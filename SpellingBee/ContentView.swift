@@ -93,7 +93,7 @@ struct MainView: View {
                         let userGames = gameManager.games.filter {
                             $0.creatorID == gameManager.currentUser?.id ||
                             $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")
-                        }
+                        }.sorted { $0.creationDate > $1.creationDate } // Sort by most recent first
                         
                         if userGames.isEmpty {
                             // Empty state
@@ -127,7 +127,7 @@ struct MainView: View {
             .background(
                 Color(.systemBackground)
                     .overlay(
-                        Image("SpellingBee") // Optional: Add a subtle game-themed background
+                        Image("SpellingBee")
                             .resizable()
                             .scaledToFit()
                             .opacity(0.05)
@@ -135,15 +135,101 @@ struct MainView: View {
             )
             .navigationBarHidden(true)
             .refreshable {
-                // Pull to refresh functionality
                 gameManager.loadData()
             }
         }
     }
 }
+
+// MARK: - Score Progress Bar for Game Card
+struct UserScoreProgressBar: View {
+    let currentScore: Int
+    let bestPossibleScore: Int
+    let userName: String
+    let correctCount: Int
+    let totalWords: Int
+    
+    private var progress: Double {
+        guard bestPossibleScore > 0 else { return 0 }
+        return min(Double(currentScore) / Double(bestPossibleScore), 1.0)
+    }
+    
+    private var progressColor: Color {
+        if progress >= 0.8 {
+            return .green
+        } else if progress >= 0.5 {
+            return .blue
+        } else if progress >= 0.3 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.2))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Text(String(userName.prefix(1)).uppercased())
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                    )
+                
+                Text(userName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                Spacer()
+                
+                Text("\(currentScore) pts")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(progressColor)
+                
+                Text("(\(correctCount)/\(totalWords))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Background
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 8)
+                    
+                    // Progress fill
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [progressColor.opacity(0.7), progressColor]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(0, geometry.size.width * progress), height: 8)
+                        .animation(.easeInOut(duration: 0.5), value: progress)
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+}
+
 struct GameCardView: View {
     @EnvironmentObject var gameManager: GameManager
     let game: MultiUserGame
+    
+    // Best possible score: 90 points per word (100 base - 10 penalty for 5 seconds)
+    private var bestPossibleScore: Int {
+        return game.wordCount * 90
+    }
     
     var body: some View {
         NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
@@ -167,15 +253,22 @@ struct GameCardView: View {
                     
                     Spacer()
                     
-                    // Active badge
-                    Text("Active")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.2))
-                        .foregroundColor(.green)
-                        .cornerRadius(8)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        // Active badge
+                        Text("Active")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.2))
+                            .foregroundColor(.green)
+                            .cornerRadius(8)
+                        
+                        // Creation date
+                        Text(formattedDate)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Divider()
@@ -208,32 +301,55 @@ struct GameCardView: View {
                             .foregroundColor(.secondary)
                     }
                     
+                    // Best possible score
+                    VStack(spacing: 4) {
+                        HStack {
+                            Image(systemName: "star.fill")
+                                .foregroundColor(.yellow)
+                            Text("\(bestPossibleScore)")
+                                .fontWeight(.medium)
+                        }
+                        Text("Max Pts")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    
                     Spacer()
                 }
                 
-                // Player Progress
+                // Player Progress with Score Bars
                 if game.hasGeneratedWords {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Progress")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        ForEach(Array(game.participantsIDs.prefix(3)), id: \.self) { participantID in
-                            if let participant = gameManager.getUser(by: participantID) {
-                                PlayerProgressRow(
-                                    participant: participant,
-                                    correctCount: gameManager.getCorrectWordCount(for: game.id, userID: participantID),
-                                    totalCount: game.wordCount
-                                )
-                            }
-                        }
-                        
-                        if game.participantsIDs.count > 3 {
-                            Text("... and \(game.participantsIDs.count - 3) more")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Player Scores")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Text("Best: \(bestPossibleScore) pts")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
+                        
+                        ForEach(Array(game.participantsIDs), id: \.self) { participantID in
+                            if let participant = gameManager.getUser(by: participantID) {
+                                let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
+                                let score = progress?.score ?? 0
+                                let correctCount = progress?.correctlySpelledWords.count ?? 0
+                                
+                                UserScoreProgressBar(
+                                    currentScore: score,
+                                    bestPossibleScore: bestPossibleScore,
+                                    userName: participant.displayName,
+                                    correctCount: correctCount,
+                                    totalWords: game.wordCount
+                                )
+                            }
+                        }
                     }
+                    .padding(.top, 4)
                 }
             }
             .padding()
@@ -257,6 +373,12 @@ struct GameCardView: View {
         case 3: return .red
         default: return .orange
         }
+    }
+    
+    private var formattedDate: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: game.creationDate, relativeTo: Date())
     }
 }
 
@@ -367,10 +489,9 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(colorScheme) // Adapts to system dark/light mode
+        .preferredColorScheme(colorScheme)
         .animation(.easeInOut(duration: 0.3), value: userManager.isAuthenticated)
         .onAppear {
-            // Set up the relationship between managers
             gameManager.setUserManager(userManager)
         }
     }

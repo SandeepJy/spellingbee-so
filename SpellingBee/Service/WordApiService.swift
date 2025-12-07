@@ -6,6 +6,7 @@ enum WordAPIError: Error {
     case decodingError
     case noAudioAvailable
     case networkError(Error)
+    case insufficientWords
     
     var localizedDescription: String {
         switch self {
@@ -19,6 +20,8 @@ enum WordAPIError: Error {
             return "No audio available for this word"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .insufficientWords:
+            return "Could not find enough words with audio"
         }
     }
 }
@@ -100,55 +103,109 @@ class WordAPIService {
     }
     
     /// Fetches random words with their details and audio URLs
+    /// Will keep fetching until we have the requested count of words with audio
     /// - Parameters:
-    ///   - count: Number of words to fetch
+    ///   - count: Number of words to fetch (with audio)
     ///   - length: Length of words
     ///   - completion: Completion handler with array of words with details
     func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5, completion: @escaping (Result<[(word: String, audioURL: String?, definition: String?)], WordAPIError>) -> Void) {
-        fetchRandomWords(count: count, length: length) { [weak self] result in
-            switch result {
-            case .success(let words):
-                let group = DispatchGroup()
-                var wordsWithDetails: [(word: String, audioURL: String?, definition: String?)] = []
-                var hasError = false
-                
-                for word in words {
-                    group.enter()
-                    self?.fetchWordDetails(word: word) { detailResult in
-                        defer { group.leave() }
+        
+        var wordsWithAudio: [(word: String, audioURL: String?, definition: String?)] = []
+        var attemptCount = 0
+        let maxAttempts = 5
+        
+        func fetchBatch() {
+            attemptCount += 1
+            let remainingCount = count - wordsWithAudio.count
+            // Fetch more words than needed since some won't have audio
+            let fetchCount = min(remainingCount * 3, 30)
+            
+            print("📚 Fetching batch \(attemptCount): need \(remainingCount) more words, fetching \(fetchCount)")
+            
+            fetchRandomWords(count: fetchCount, length: length) { [weak self] result in
+                switch result {
+                case .success(let words):
+                    let group = DispatchGroup()
+                    var batchResults: [(word: String, audioURL: String?, definition: String?)] = []
+                    let lock = NSLock()
+                    
+                    for word in words {
+                        // Skip if we already have this word
+                        if wordsWithAudio.contains(where: { $0.word.lowercased() == word.lowercased() }) {
+                            continue
+                        }
                         
-                        switch detailResult {
-                        case .success(let details):
-                            // Find the first phonetic with audio
-                            let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
+                        group.enter()
+                        self?.fetchWordDetails(word: word) { detailResult in
+                            defer { group.leave() }
                             
-                            // Get the first definition
-                            let definition = details.meanings.first?.definitions.first?.definition
-                            
-                            wordsWithDetails.append((word: word, audioURL: audioURL, definition: definition))
-                            
-                        case .failure(let error):
-                            print("Failed to fetch details for '\(word)': \(error.localizedDescription)")
-                            // Still add the word but without audio/definition
-                            wordsWithDetails.append((word: word, audioURL: nil, definition: nil))
+                            switch detailResult {
+                            case .success(let details):
+                                // Find the first phonetic with a valid audio URL
+                                let audioURL = details.phonetics.first(where: {
+                                    $0.audio != nil && !$0.audio!.isEmpty
+                                })?.audio
+                                
+                                // Only add if we have audio
+                                if let audioURL = audioURL, !audioURL.isEmpty {
+                                    let definition = details.meanings.first?.definitions.first?.definition
+                                    
+                                    lock.lock()
+                                    batchResults.append((word: word, audioURL: audioURL, definition: definition))
+                                    lock.unlock()
+                                    
+                                    print("✅ Found word with audio: \(word)")
+                                } else {
+                                    print("⚠️ No audio for word: \(word)")
+                                }
+                                
+                            case .failure(let error):
+                                print("❌ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+                            }
                         }
                     }
-                }
-                
-                group.notify(queue: .main) {
-                    // Filter out words without audio
-                    let validWords = wordsWithDetails.filter { $0.audioURL != nil }
                     
-                    if validWords.isEmpty {
-                        completion(.failure(.noAudioAvailable))
+                    group.notify(queue: .main) {
+                        // Add batch results to our collection
+                        wordsWithAudio.append(contentsOf: batchResults)
+                        
+                        print("📊 Progress: \(wordsWithAudio.count)/\(count) words with audio")
+                        
+                        // Check if we have enough words
+                        if wordsWithAudio.count >= count {
+                            // Return exactly the requested count
+                            let finalWords = Array(wordsWithAudio.prefix(count))
+                            print("🎉 Successfully found \(finalWords.count) words with audio")
+                            completion(.success(finalWords))
+                        } else if attemptCount < maxAttempts {
+                            // Try another batch
+                            print("🔄 Need more words, fetching another batch...")
+                            fetchBatch()
+                        } else {
+                            // Max attempts reached
+                            if wordsWithAudio.isEmpty {
+                                completion(.failure(.noAudioAvailable))
+                            } else {
+                                // Return what we have
+                                print("⚠️ Max attempts reached, returning \(wordsWithAudio.count) words")
+                                completion(.success(wordsWithAudio))
+                            }
+                        }
+                    }
+                    
+                case .failure(let error):
+                    if attemptCount < maxAttempts {
+                        // Retry on failure
+                        print("❌ Fetch failed, retrying...")
+                        fetchBatch()
                     } else {
-                        completion(.success(validWords))
+                        completion(.failure(error))
                     }
                 }
-                
-            case .failure(let error):
-                completion(.failure(error))
             }
         }
+        
+        // Start fetching
+        fetchBatch()
     }
 }

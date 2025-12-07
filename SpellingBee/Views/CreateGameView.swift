@@ -8,6 +8,7 @@ struct CreateGameView: View {
     @State private var numberOfWords = 10 // Default word count
     @State private var isCreatingGame = false
     @State private var errorMessage: String?
+    @State private var statusMessage: String?
     
     let wordCountOptions = [5, 10, 15, 20]
     
@@ -24,6 +25,7 @@ struct CreateGameView: View {
                         showCreateGameView = false
                     }
                     .foregroundColor(.red)
+                    .disabled(isCreatingGame)
                 }
                 .padding(.horizontal)
                 
@@ -113,6 +115,7 @@ struct CreateGameView: View {
                                             )
                                             .cornerRadius(8)
                                     }
+                                    .disabled(isCreatingGame)
                                 }
                             }
                             
@@ -123,6 +126,21 @@ struct CreateGameView: View {
                         .padding()
                         .background(Color(.systemGray6).opacity(0.5))
                         .cornerRadius(12)
+                        
+                        // Status Message
+                        if let statusMessage = statusMessage {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text(statusMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
                         
                         // Error Message
                         if let errorMessage = errorMessage {
@@ -149,6 +167,7 @@ struct CreateGameView: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                 .scaleEffect(0.8)
+                            Text("Creating Game...")
                         } else {
                             Image(systemName: "plus.circle.fill")
                             Text("Create Game")
@@ -168,8 +187,8 @@ struct CreateGameView: View {
                     .cornerRadius(12)
                     .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 3)
                 }
-                .disabled(isCreatingGame || selectedUsers.isEmpty)
-                .opacity((isCreatingGame || selectedUsers.isEmpty) ? 0.6 : 1.0)
+                .disabled(isCreatingGame)
+                .opacity(isCreatingGame ? 0.6 : 1.0)
                 .padding(.horizontal)
             }
             .padding(.vertical)
@@ -196,38 +215,52 @@ struct CreateGameView: View {
         
         isCreatingGame = true
         errorMessage = nil
+        statusMessage = "Creating game..."
         
         var participantsIDs = selectedUsers.map { $0.id }
         participantsIDs.append(currentUser.id)
         
-        // Create the game with initial settings
+        print("🎮 Creating game with \(participantsIDs.count) participants, \(numberOfWords) words, difficulty \(selectedDifficulty)")
+        
+        // Create the game first
         gameManager.createGame(
             creatorID: currentUser.id,
             participantsIDs: Set(participantsIDs),
             difficulty: selectedDifficulty,
             wordCount: numberOfWords
         ) { gameID in
-            // Generate words immediately after creating the game
-            if let gameID = gameID {
-                gameManager.generateWordsForGame(gameID: gameID, wordCount: numberOfWords, difficulty: selectedDifficulty) { result in
-                    DispatchQueue.main.async {
-                        self.isCreatingGame = false
-                        
-                        switch result {
-                        case .success:
-                            // Start the game automatically
-                            _ = gameManager.startGame(gameID: gameID)
-                            self.showCreateGameView = false
-                            
-                        case .failure(let error):
-                            self.errorMessage = "Failed to generate words: \(error.localizedDescription)"
-                        }
-                    }
-                }
-            } else {
+            guard let gameID = gameID else {
                 DispatchQueue.main.async {
                     self.isCreatingGame = false
+                    self.statusMessage = nil
                     self.errorMessage = "Failed to create game"
+                }
+                return
+            }
+            
+            print("🎮 Game created with ID: \(gameID), generating words...")
+            
+            DispatchQueue.main.async {
+                self.statusMessage = "Generating words with audio..."
+            }
+            
+            // Generate words for the game
+            gameManager.generateWordsForGame(gameID: gameID, wordCount: numberOfWords, difficulty: selectedDifficulty) { result in
+                DispatchQueue.main.async {
+                    self.isCreatingGame = false
+                    self.statusMessage = nil
+                    
+                    switch result {
+                    case .success(let words):
+                        print("🎮 Successfully generated \(words.count) words")
+                        // Start the game
+                        _ = gameManager.startGame(gameID: gameID)
+                        self.showCreateGameView = false
+                        
+                    case .failure(let error):
+                        print("❌ Failed to generate words: \(error)")
+                        self.errorMessage = "Failed to generate words: \(error.localizedDescription). Please try again."
+                    }
                 }
             }
         }

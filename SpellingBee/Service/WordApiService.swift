@@ -6,6 +6,7 @@ enum WordAPIError: Error {
     case decodingError
     case noAudioAvailable
     case networkError(Error)
+    case insufficientWords
     
     var localizedDescription: String {
         switch self {
@@ -19,6 +20,8 @@ enum WordAPIError: Error {
             return "No audio available for this word"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .insufficientWords:
+            return "Could not fetch enough words with audio"
         }
     }
 }
@@ -105,12 +108,20 @@ class WordAPIService {
     ///   - length: Length of words
     ///   - completion: Completion handler with array of words with details
     func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5, completion: @escaping (Result<[(word: String, audioURL: String?, definition: String?)], WordAPIError>) -> Void) {
-        fetchRandomWords(count: count, length: length) { [weak self] result in
+        
+        // Request more words than needed to account for filtering
+        let requestCount = count * 3 // Request 3x to ensure we get enough with audio
+        
+        print("🌐 Requesting \(requestCount) words from API to get \(count) with audio...")
+        
+        fetchRandomWords(count: requestCount, length: length) { [weak self] result in
             switch result {
             case .success(let words):
+                print("📥 Received \(words.count) words from random word API")
+                
                 let group = DispatchGroup()
                 var wordsWithDetails: [(word: String, audioURL: String?, definition: String?)] = []
-                var hasError = false
+                let lock = NSLock() // Thread-safe access to wordsWithDetails
                 
                 for word in words {
                     group.enter()
@@ -125,28 +136,42 @@ class WordAPIService {
                             // Get the first definition
                             let definition = details.meanings.first?.definitions.first?.definition
                             
-                            wordsWithDetails.append((word: word, audioURL: audioURL, definition: definition))
+                            // Only add if we have audio
+                            if audioURL != nil {
+                                lock.lock()
+                                wordsWithDetails.append((word: word, audioURL: audioURL, definition: definition))
+                                lock.unlock()
+                            }
                             
                         case .failure(let error):
-                            print("Failed to fetch details for '\(word)': \(error.localizedDescription)")
-                            // Still add the word but without audio/definition
-                            wordsWithDetails.append((word: word, audioURL: nil, definition: nil))
+                            print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
                         }
                     }
                 }
                 
                 group.notify(queue: .main) {
-                    // Filter out words without audio
-                    let validWords = wordsWithDetails.filter { $0.audioURL != nil }
+                    print("✅ Found \(wordsWithDetails.count) words with audio (needed \(count))")
                     
-                    if validWords.isEmpty {
-                        completion(.failure(.noAudioAvailable))
+                    // Take only the requested count
+                    let finalWords = Array(wordsWithDetails.prefix(count))
+                    
+                    if finalWords.count < count {
+                        print("⚠️ Warning: Only got \(finalWords.count) words with audio, needed \(count)")
+                        // Still return what we have rather than failing completely
+                        if finalWords.isEmpty {
+                            completion(.failure(.noAudioAvailable))
+                        } else {
+                            completion(.success(finalWords))
+                        }
                     } else {
-                        completion(.success(validWords))
+                        print("🎉 Successfully returning \(finalWords.count) words:")
+                        finalWords.forEach { print("   - \($0.word)") }
+                        completion(.success(finalWords))
                     }
                 }
                 
             case .failure(let error):
+                print("❌ Failed to fetch random words: \(error.localizedDescription)")
                 completion(.failure(error))
             }
         }

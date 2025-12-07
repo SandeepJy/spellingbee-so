@@ -1,5 +1,4 @@
 import SwiftUI
-
 import AVFoundation
 
 struct GamePlayView: View {
@@ -16,10 +15,24 @@ struct GamePlayView: View {
     @State private var completedWordIndices: [Int] = []
     @State private var correctlySpelledWords: [String] = []
     @State private var audioPlayer: AVAudioPlayer?
+    @State private var showCorrectSpelling = false
+    @State private var correctSpelling = ""
+    @State private var showCelebration = false
     @Environment(\.presentationMode) var presentationMode
     
     private var currentWord: Word? {
         game.words.indices.contains(currentWordIndex) ? game.words[currentWordIndex] : nil
+    }
+    
+    // Calculate best possible score (100 points per word if completed in 5 seconds)
+    private var bestPossibleScore: Int {
+        return game.wordCount * 100
+    }
+    
+    // Calculate current progress percentage
+    private var progressPercentage: Double {
+        guard bestPossibleScore > 0 else { return 0 }
+        return Double(score) / Double(bestPossibleScore)
     }
     
     var body: some View {
@@ -51,8 +64,9 @@ struct GamePlayView: View {
                 }
                 .padding(.horizontal)
                 
-                // Progress
+                // Progress with Score Bar
                 VStack(spacing: 8) {
+                    // Word completion progress
                     ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
                         .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                         .scaleEffect(y: 1.5)
@@ -67,6 +81,45 @@ struct GamePlayView: View {
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.green)
+                    }
+                    
+                    // Score progress bar
+                    VStack(spacing: 4) {
+                        HStack {
+                            Text("Score Progress")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(score)/\(bestPossibleScore)")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundColor(.orange)
+                        }
+                        
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                // Background
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.gray.opacity(0.2))
+                                    .frame(height: 8)
+                                
+                                // Progress fill with gradient
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                progressPercentage < 0.5 ? .red : .orange,
+                                                progressPercentage < 0.5 ? .orange : .green
+                                            ]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geometry.size.width * progressPercentage, height: 8)
+                                    .animation(.easeInOut, value: progressPercentage)
+                            }
+                        }
+                        .frame(height: 8)
                     }
                 }
                 .padding(.horizontal)
@@ -120,6 +173,23 @@ struct GamePlayView: View {
                                     .font(.caption)
                                     .foregroundColor(.orange)
                             }
+                            
+                            // Show correct spelling if wrong answer
+                            if showCorrectSpelling {
+                                VStack(spacing: 4) {
+                                    Text("Correct spelling:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(correctSpelling)
+                                        .font(.title3)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.green)
+                                }
+                                .padding()
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(8)
+                                .transition(.scale.combined(with: .opacity))
+                            }
                         }
                         
                     } else if completedWordIndices.count == game.wordCount {
@@ -142,6 +212,16 @@ struct GamePlayView: View {
                                 Text("Correctly Spelled: \(correctlySpelledWords.count)/\(game.wordCount)")
                                     .font(.headline)
                                     .foregroundColor(.green)
+                                
+                                Text("Best Possible: \(bestPossibleScore)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                // Final score percentage
+                                let finalPercentage = Int(progressPercentage * 100)
+                                Text("\(finalPercentage)% of maximum score")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
                             }
                         }
                         .padding()
@@ -163,7 +243,7 @@ struct GamePlayView: View {
                 Spacer()
                 
                 // Action Buttons
-                if currentWord != nil {
+                if currentWord != nil && !showCorrectSpelling {
                     Button(action: checkSpelling) {
                         Text("Submit Answer")
                             .font(.headline)
@@ -181,6 +261,19 @@ struct GamePlayView: View {
                     }
                     .disabled(userInput.isEmpty)
                     .opacity(userInput.isEmpty ? 0.6 : 1.0)
+                } else if showCorrectSpelling {
+                    Button(action: moveToNextWord) {
+                        HStack {
+                            Text("Next Word")
+                            Image(systemName: "arrow.right.circle.fill")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                    }
                 } else if completedWordIndices.count == game.wordCount {
                     Button(action: { presentationMode.wrappedValue.dismiss() }) {
                         HStack {
@@ -197,6 +290,13 @@ struct GamePlayView: View {
                 }
             }
             .padding()
+            
+            // Celebration animation overlay
+            if showCelebration {
+                CelebrationView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
         .onAppear {
             configureAudioSession()
@@ -255,6 +355,8 @@ struct GamePlayView: View {
                 return
             }
         }
+        // If all words are completed, stay at current index
+        // This fixes the bug where user could keep entering the last word
     }
     
     private func playWord() {
@@ -275,7 +377,7 @@ struct GamePlayView: View {
                 DispatchQueue.main.async {
                     do {
                         self.audioPlayer = try AVAudioPlayer(data: data)
-                        self.audioPlayer?.volume = 1.0 // Set maximum volume
+                        self.audioPlayer?.volume = 1.0
                         self.audioPlayer?.prepareToPlay()
                         self.audioPlayer?.play()
                         
@@ -302,7 +404,7 @@ struct GamePlayView: View {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             timeElapsed += 0.1
-            if timeElapsed >= 30 { // Max 30 seconds per word
+            if timeElapsed >= 30 {
                 checkSpelling()
             }
         }
@@ -315,8 +417,28 @@ struct GamePlayView: View {
         let userAnswer = userInput.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         isCorrect = userAnswer == word.word.lowercased()
         
-        if isCorrect && !correctlySpelledWords.contains(word.word) {
-            correctlySpelledWords.append(word.word)
+        if isCorrect {
+            if !correctlySpelledWords.contains(word.word) {
+                correctlySpelledWords.append(word.word)
+            }
+            
+            // Show celebration animation
+            withAnimation {
+                showCelebration = true
+            }
+            
+            // Hide celebration after delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0)  {
+                withAnimation {
+                    showCelebration = false
+                }
+            }
+        } else {
+            // Show correct spelling for wrong answers
+            correctSpelling = word.word
+            withAnimation {
+                showCorrectSpelling = true
+            }
         }
         
         if !completedWordIndices.contains(currentWordIndex) {
@@ -328,16 +450,25 @@ struct GamePlayView: View {
         
         saveUserProgress()
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation {
-                showResult = false
-                userInput = ""
-                timeElapsed = 0
-                audioPlayer = nil
-                
-                if completedWordIndices.count < game.wordCount {
-                    findNextUncompletedWord()
-                }
+        // Only auto-advance for correct answers
+        if isCorrect {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                moveToNextWord()
+            }
+        }
+    }
+    
+    private func moveToNextWord() {
+        withAnimation {
+            showResult = false
+            showCorrectSpelling = false
+            correctSpelling = ""
+            userInput = ""
+            timeElapsed = 0
+            audioPlayer = nil
+            
+            if completedWordIndices.count < game.wordCount {
+                findNextUncompletedWord()
             }
         }
     }
@@ -345,10 +476,53 @@ struct GamePlayView: View {
     private func calculatePoints() -> Int {
         if !isCorrect { return 0 }
         let basePoints = 100
-        let timePenalty = Int(timeElapsed * 2) // 2 points per second
+        let timePenalty = Int(timeElapsed * 2)
         return max(0, basePoints - timePenalty)
     }
 }
+
+// Celebration View with exploding stars animation
+struct CelebrationView: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            ForEach(0..<20, id: \.self) { index in
+                StarView()
+                    .offset(
+                        x: isAnimating ? CGFloat.random(in: -200...200) : 0,
+                        y: isAnimating ? CGFloat.random(in: -400...400) : 0
+                    )
+                    .opacity(isAnimating ? 0 : 1)
+                    .scaleEffect(isAnimating ? 2.0 : 0.1)
+                    .animation(
+                        .easeOut(duration: 1.0)
+                        .delay(Double(index) * 0.02),
+                        value: isAnimating
+                    )
+            }
+        }
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+struct StarView: View {
+    let colors: [Color] = [.yellow, .orange, .pink, .purple, .blue, .green]
+    let color: Color
+    
+    init() {
+        color = colors.randomElement() ?? .yellow
+    }
+    
+    var body: some View {
+        Image(systemName: "star.fill")
+            .font(.system(size: 30))
+            .foregroundColor(color)
+    }
+}
+
 // Result Popup
 struct ResultPopup: View {
     let isCorrect: Bool
@@ -364,9 +538,11 @@ struct ResultPopup: View {
                 .font(.title2)
                 .foregroundColor(.primary)
             
-            Text("+\(points) points")
-                .font(.headline)
-                .foregroundColor(.blue)
+            if isCorrect {
+                Text("+\(points) points")
+                    .font(.headline)
+                    .foregroundColor(.blue)
+            }
         }
         .padding()
         .background(Color(.systemBackground))

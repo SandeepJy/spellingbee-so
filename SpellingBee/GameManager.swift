@@ -18,6 +18,8 @@ class GameManager: ObservableObject {
     private var db = Firestore.firestore()
     private var storage = Storage.storage()
     private var userManager: UserManager?
+    private var gamesListener: ListenerRegistration?
+    private var progressListener: ListenerRegistration?
     
     init() {
         // Note: Data loading will be triggered when user is authenticated
@@ -42,6 +44,7 @@ class GameManager: ObservableObject {
                     // User is authenticated and we have their details
                     if !self.isDataLoaded {
                         self.loadData()
+                        self.setupRealtimeListeners()
                     }
                 } else if !isAuthenticated {
                     // User is not authenticated, clear all data
@@ -94,6 +97,12 @@ class GameManager: ObservableObject {
         userGameProgresses = []
         currentUser = nil
         isDataLoaded = false
+        
+        // Remove listeners
+        gamesListener?.remove()
+        progressListener?.remove()
+        gamesListener = nil
+        progressListener = nil
     }
     
     func getDocumentsDirectory() -> URL {
@@ -216,6 +225,8 @@ class GameManager: ObservableObject {
             return
         }
         
+        print("🎲 Generating \(wordCount) words for game...")
+        
         // Determine word length based on difficulty
         let wordLength: Int
         switch difficulty {
@@ -229,13 +240,15 @@ class GameManager: ObservableObject {
             wordLength = 5
         }
         
-        // Fetch random words with audio
+        // Fetch random words with audio - REQUEST THE CORRECT COUNT
         WordAPIService.shared.fetchRandomWordsWithDetails(count: wordCount, length: wordLength) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 
                 switch result {
                 case .success(let wordsData):
+                    print("✅ Successfully fetched \(wordsData.count) words from API")
+                    
                     // Create Word objects from the API data
                     let words = wordsData.map { wordData in
                         Word(
@@ -247,15 +260,23 @@ class GameManager: ObservableObject {
                         )
                     }
                     
+                    print("📝 Created \(words.count) Word objects")
+                    print("   Words: \(words.map { $0.word })")
+                    
                     // Update game with generated words
                     self.games[gameIndex].words = words
                     self.games[gameIndex].hasGeneratedWords = true
                     self.games[gameIndex].isStarted = true // Auto-start the game
+                    
+                    // Important: Save the game to Firestore
                     self.saveGame(self.games[gameIndex])
+                    
+                    print("💾 Game saved with \(self.games[gameIndex].words.count) words")
                     
                     completion(.success(words))
                     
                 case .failure(let error):
+                    print("❌ Failed to fetch words: \(error.localizedDescription)")
                     completion(.failure(error))
                 }
             }
@@ -371,8 +392,13 @@ class GameManager: ObservableObject {
                     print("Error loading games: \(error)")
                 } else {
                     self.games = querySnapshot?.documents.compactMap { document in
-                        try? document.data(as: MultiUserGame.self)
+                        let game = try? document.data(as: MultiUserGame.self)
+                        if let game = game {
+                            print("📦 Loaded game \(game.id) with \(game.words.count) words")
+                        }
+                        return game
                     } ?? []
+                    print("📦 Total games loaded: \(self.games.count)")
                 }
                 completion()
             }
@@ -385,8 +411,9 @@ class GameManager: ObservableObject {
     private func saveGame(_ game: MultiUserGame) {
         do {
             try db.collection("games").document(game.id.uuidString).setData(from: game)
+            print("💾 Saved game \(game.id) to Firestore with \(game.words.count) words")
         } catch {
-            print("Error saving game: \(error)")
+            print("❌ Error saving game: \(error)")
         }
     }
     
@@ -514,6 +541,8 @@ class GameManager: ObservableObject {
             return
         }
         
+        print("🔔 Setting up real-time listeners...")
+        
         // Listen for users changes
         db.collection("users").addSnapshotListener { [weak self] querySnapshot, error in
             guard let documents = querySnapshot?.documents else {
@@ -529,21 +558,27 @@ class GameManager: ObservableObject {
         }
         
         // Listen for games changes
-        db.collection("games").addSnapshotListener { [weak self] querySnapshot, error in
+        gamesListener = db.collection("games").addSnapshotListener { [weak self] querySnapshot, error in
             guard let documents = querySnapshot?.documents else {
                 print("Error fetching games: \(error?.localizedDescription ?? "Unknown error")")
                 return
             }
             
             DispatchQueue.main.async {
-                self?.games = documents.compactMap { document in
-                    try? document.data(as: MultiUserGame.self)
+                let newGames = documents.compactMap { document -> MultiUserGame? in
+                    let game = try? document.data(as: MultiUserGame.self)
+                    if let game = game {
+                        print("🔔 Real-time update: Game \(game.id) has \(game.words.count) words")
+                    }
+                    return game
                 }
+                self?.games = newGames
+                print("🔔 Games updated via listener: \(newGames.count) total")
             }
         }
         
         // Listen for user game progress changes
-        db.collection("userGameProgresses").addSnapshotListener { [weak self] querySnapshot, error in
+        progressListener = db.collection("userGameProgresses").addSnapshotListener { [weak self] querySnapshot, error in
             guard let documents = querySnapshot?.documents else {
                 print("Error fetching user game progresses: \(error?.localizedDescription ?? "Unknown error")")
                 return
@@ -553,57 +588,7 @@ class GameManager: ObservableObject {
                 self?.userGameProgresses = documents.compactMap { document in
                     try? document.data(as: UserGameProgress.self)
                 }
-            }
-        }
-    }
-    
-    // Add this to GameManager class
-
-    /**
-     * Generates random words for a game using the API
-     *
-     * @param gameID The game to generate words for
-     * @param completion Callback with success status
-     */
-    func generateWordsForGame(gameID: UUID, completion: @escaping (Result<[Word], Error>) -> Void) {
-        guard userManager?.isAuthenticated == true else {
-            completion(.failure(NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])))
-            return
-        }
-        
-        guard let gameIndex = games.firstIndex(where: { $0.id == gameID }) else {
-            completion(.failure(NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])))
-            return
-        }
-        
-        // Fetch 10 random words with audio
-        WordAPIService.shared.fetchRandomWordsWithDetails(count: 10, length: 5) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                
-                switch result {
-                case .success(let wordsData):
-                    // Create Word objects from the API data
-                    let words = wordsData.map { wordData in
-                        Word(
-                            word: wordData.word,
-                            soundURL: wordData.audioURL != nil ? URL(string: wordData.audioURL!) : nil,
-                            level: self.games[gameIndex].difficultyLevel,
-                            createdByID: "system", // Mark as system-generated
-                            gameID: gameID
-                        )
-                    }
-                    
-                    // Update game with generated words
-                    self.games[gameIndex].words = words
-                    self.games[gameIndex].hasGeneratedWords = true
-                    self.saveGame(self.games[gameIndex])
-                    
-                    completion(.success(words))
-                    
-                case .failure(let error):
-                    completion(.failure(error))
-                }
+                print("🔔 Progress updated via listener: \(self?.userGameProgresses.count ?? 0) records")
             }
         }
     }

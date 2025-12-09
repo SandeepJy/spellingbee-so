@@ -22,7 +22,7 @@
 		EB5C41272DCAE4E500D1CE9D /* Word.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5C41262DCAE4E300D1CE9D /* Word.swift */; };
 		EB5C41292DCAE52400D1CE9D /* CreateGameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5C41282DCAE52000D1CE9D /* CreateGameView.swift */; };
 		EB5C412B2DCAE59F00D1CE9D /* GamePlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5C412A2DCAE59C00D1CE9D /* GamePlayView.swift */; };
-		EB5FC8802EE49B3C00B1718E /* RandeomWordResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC87F2EE49B3700B1718E /* RandeomWordResponse.swift */; };
+		EB5FC8802EE49B3C00B1718E /* RandomWordResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */; };
 		EB5FC8822EE49B6300B1718E /* DictionaryResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */; };
 		EB5FC8862EE49BD600B1718E /* WordApiService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8852EE49BCF00B1718E /* WordApiService.swift */; };
 		EB70CDA42DAB429800C2F52E /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = EB70CDA32DAB429800C2F52E /* FirebaseCore */; };
@@ -60,7 +60,7 @@
 		EB5C41262DCAE4E300D1CE9D /* Word.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Word.swift; sourceTree = "<group>"; };
 		EB5C41282DCAE52000D1CE9D /* CreateGameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateGameView.swift; sourceTree = "<group>"; };
 		EB5C412A2DCAE59C00D1CE9D /* GamePlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamePlayView.swift; sourceTree = "<group>"; };
-		EB5FC87F2EE49B3700B1718E /* RandeomWordResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandeomWordResponse.swift; sourceTree = "<group>"; };
+		EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandomWordResponse.swift; sourceTree = "<group>"; };
 		EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryResponse.swift; sourceTree = "<group>"; };
 		EB5FC8852EE49BCF00B1718E /* WordApiService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordApiService.swift; sourceTree = "<group>"; };
 		EB70CDA52DAB431400C2F52E /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
@@ -121,7 +121,6 @@
 			isa = PBXGroup;
 			children = (
 				EB5FC8842EE49BC400B1718E /* Service */,
-				EB3A8D9E2DED3E34007D469B /* UserGameProgress.swift */,
 				EB70CDA92DAB438300C2F52E /* Views */,
 				EB16AEA62C5DB5FC0017F738 /* Model */,
 				EB16AE972C5DB5E50017F738 /* SpellingBeeApp.swift */,
@@ -148,8 +147,9 @@
 		EB16AEA62C5DB5FC0017F738 /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				EB3A8D9E2DED3E34007D469B /* UserGameProgress.swift */,
 				EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */,
-				EB5FC87F2EE49B3700B1718E /* RandeomWordResponse.swift */,
+				EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */,
 				EB5C41262DCAE4E300D1CE9D /* Word.swift */,
 				EB5C41242DCAE4B800D1CE9D /* MultiUserGame.swift */,
 				EB70CDA72DAB435E00C2F52E /* SpellGameUser.swift */,
@@ -301,7 +301,7 @@
 				EB16AE9A2C5DB5E50017F738 /* ContentView.swift in Sources */,
 				EB225D312DAC9CED00BE66B9 /* VoiceViewModel.swift in Sources */,
 				EB70CDAB2DAB43A200C2F52E /* LoginRegisterView.swift in Sources */,
-				EB5FC8802EE49B3C00B1718E /* RandeomWordResponse.swift in Sources */,
+				EB5FC8802EE49B3C00B1718E /* RandomWordResponse.swift in Sources */,
 				EB16AE982C5DB5E50017F738 /* SpellingBeeApp.swift in Sources */,
 				EB5C41272DCAE4E500D1CE9D /* Word.swift in Sources */,
 				EB225D252DAB472600BE66B9 /* GameManager.swift in Sources */,
@@ -479,7 +479,8 @@
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -517,7 +518,8 @@
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;

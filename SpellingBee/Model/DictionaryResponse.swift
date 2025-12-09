@@ -1,7 +1,6 @@
 import Foundation
 
-// Models for Dictionary API response
-struct DictionaryResponse: Codable {
+struct DictionaryResponse: Codable, Sendable {
     let word: String
     let phonetic: String?
     let phonetics: [Phonetic]
@@ -10,28 +9,28 @@ struct DictionaryResponse: Codable {
     let sourceUrls: [String]?
 }
 
-struct Phonetic: Codable {
+struct Phonetic: Codable, Sendable {
     let text: String?
     let audio: String?
     let sourceUrl: String?
     let license: License?
 }
 
-struct Meaning: Codable {
+struct Meaning: Codable, Sendable {
     let partOfSpeech: String
     let definitions: [Definition]
     let synonyms: [String]?
     let antonyms: [String]?
 }
 
-struct Definition: Codable {
+struct Definition: Codable, Sendable {
     let definition: String
     let synonyms: [String]?
     let antonyms: [String]?
     let example: String?
 }
 
-struct License: Codable {
+struct License: Codable, Sendable {
     let name: String
     let url: String
 }

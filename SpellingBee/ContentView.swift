@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import Combine
 import Firebase
 import FirebaseAuth
 import FirebaseFirestore
@@ -22,7 +21,6 @@ struct MainView: View {
                             .foregroundColor(.primary)
                         Spacer()
                         
-                        // Profile/Settings button
                         Button(action: {
                             // TODO: Add profile/settings action
                         }) {
@@ -36,7 +34,6 @@ struct MainView: View {
                                 )
                         }
                         
-                        // Sign out button
                         Button(action: {
                             userManager.signOut()
                         }) {
@@ -47,7 +44,6 @@ struct MainView: View {
                     }
                     .padding(.horizontal)
                     
-                    // Welcome message
                     if let user = gameManager.currentUser {
                         Text("Welcome back, \(user.displayName)!")
                             .font(.title2)
@@ -55,7 +51,6 @@ struct MainView: View {
                             .animation(.easeInOut, value: user.username)
                     }
                     
-                    // Loading indicator while data is being fetched
                     if !gameManager.isDataLoaded {
                         VStack(spacing: 16) {
                             ProgressView()
@@ -65,7 +60,6 @@ struct MainView: View {
                         }
                         .frame(minHeight: 200)
                     } else {
-                        // New Game Button
                         Button(action: { showCreateGameView = true }) {
                             HStack {
                                 Image(systemName: "plus.circle.fill")
@@ -89,14 +83,12 @@ struct MainView: View {
                         }
                         .padding(.horizontal)
                         
-                        // Games Display
                         let userGames = gameManager.games.filter {
                             $0.creatorID == gameManager.currentUser?.id ||
                             $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")
-                        }.sorted { $0.creationDate > $1.creationDate } // Sort by most recent first
+                        }.sorted { $0.creationDate > $1.creationDate }
                         
                         if userGames.isEmpty {
-                            // Empty state
                             VStack(spacing: 20) {
                                 Image(systemName: "gamecontroller")
                                     .font(.system(size: 60))
@@ -135,7 +127,7 @@ struct MainView: View {
             )
             .navigationBarHidden(true)
             .refreshable {
-                gameManager.loadData()
+                await gameManager.loadData()
             }
         }
     }
@@ -199,12 +191,10 @@ struct UserScoreProgressBar: View {
             
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    // Background
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(.systemGray5))
                         .frame(height: 8)
                     
-                    // Progress fill
                     RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
@@ -226,7 +216,6 @@ struct GameCardView: View {
     @EnvironmentObject var gameManager: GameManager
     let game: MultiUserGame
     
-    // Best possible score: 90 points per word (100 base - 10 penalty for 5 seconds)
     private var bestPossibleScore: Int {
         return game.wordCount * 90
     }
@@ -234,7 +223,6 @@ struct GameCardView: View {
     var body: some View {
         NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
             VStack(alignment: .leading, spacing: 12) {
-                // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(game.difficultyText)
@@ -254,7 +242,6 @@ struct GameCardView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 2) {
-                        // Active badge
                         Text("Active")
                             .font(.caption)
                             .fontWeight(.bold)
@@ -264,7 +251,6 @@ struct GameCardView: View {
                             .foregroundColor(.green)
                             .cornerRadius(8)
                         
-                        // Creation date
                         Text(formattedDate)
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -273,9 +259,7 @@ struct GameCardView: View {
                 
                 Divider()
                 
-                // Game stats
                 HStack(spacing: 30) {
-                    // Player count
                     VStack(spacing: 4) {
                         HStack {
                             Image(systemName: "person.2.fill")
@@ -288,7 +272,6 @@ struct GameCardView: View {
                             .foregroundColor(.secondary)
                     }
                     
-                    // Total words
                     VStack(spacing: 4) {
                         HStack {
                             Image(systemName: "text.book.closed.fill")
@@ -301,7 +284,6 @@ struct GameCardView: View {
                             .foregroundColor(.secondary)
                     }
                     
-                    // Best possible score
                     VStack(spacing: 4) {
                         HStack {
                             Image(systemName: "star.fill")
@@ -317,7 +299,6 @@ struct GameCardView: View {
                     Spacer()
                 }
                 
-                // Player Progress with Score Bars
                 if game.hasGeneratedWords {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -422,7 +403,6 @@ struct PlayerProgressRow: View {
     }
 }
 
-// Status Badge
 struct StatusBadge: View {
     let isStarted: Bool
     
@@ -438,7 +418,6 @@ struct StatusBadge: View {
     }
 }
 
-// Word Progress Row
 struct WordProgressRow: View {
     let participant: SpellGameUser
     let game: MultiUserGame
@@ -497,7 +476,6 @@ struct ContentView: View {
     }
 }
 
-// Participant Row (reused from previous code)
 struct ParticipantRow: View {
     let participant: SpellGameUser?
     let game: MultiUserGame

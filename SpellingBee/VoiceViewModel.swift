@@ -1,14 +1,14 @@
-
 import Foundation
 import AVFoundation
 
-class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    var audioRecorder: AVAudioRecorder?
-    var audioPlayer: AVAudioPlayer?
-    var indexOfPlayer = 0
+@MainActor
+final class VoiceViewModel: NSObject, ObservableObject {
+    private var audioRecorder: AVAudioRecorder?
+    private var audioPlayer: AVAudioPlayer?
     @Published var recordedSoundURL: URL?
     @Published var isRecording: Bool = false
-    private var completionHandler: (() -> Void)?
+    
+    private var playbackContinuation: CheckedContinuation<Void, Never>?
     
     private func configureAudioSession() {
         do {
@@ -20,7 +20,7 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     
-    func startRecording(for word: String, completion: @escaping (URL?) -> Void) {
+    func startRecording(for word: String) -> URL? {
         configureAudioSession()
         
         let audioRecorderURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -28,7 +28,7 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         
         recordedSoundURL = audioRecorderURL
         
-        let settings = [
+        let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: 44100,
             AVNumberOfChannelsKey: 1,
@@ -40,11 +40,11 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             audioRecorder?.prepareToRecord()
             audioRecorder?.record()
             isRecording = true
-            completion(audioRecorderURL)
+            return audioRecorderURL
         } catch {
             print("Failed to setup recording: \(error)")
             isRecording = false
-            completion(nil)
+            return nil
         }
     }
     
@@ -61,18 +61,15 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     
-    func startPlaying(url: URL, isRemote: Bool = false, completion: @escaping () -> Void) {
-        self.completionHandler = completion
+    func startPlaying(url: URL, isRemote: Bool = false) async {
         configureAudioSession()
         
         guard FileManager.default.fileExists(atPath: url.path) else {
             print("Audio file not found at: \(url.path)")
-            completionHandler?()
-            completionHandler = nil
             return
         }
         
-        print ("Playing audio from: \(url.path)")
+        print("Playing audio from: \(url.path)")
         
         do {
             _ = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -81,32 +78,39 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             audioPlayer?.delegate = self
             audioPlayer?.prepareToPlay()
             
-            if audioPlayer?.play() == false {
-                print("Failed to play audio: playback returned false")
-                completionHandler?()
-                completionHandler = nil
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                self.playbackContinuation = continuation
+                if self.audioPlayer?.play() == false {
+                    print("Failed to play audio: playback returned false")
+                    self.playbackContinuation?.resume()
+                    self.playbackContinuation = nil
+                }
             }
         } catch {
             print("Failed to play audio: \(error.localizedDescription)")
             if let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError {
                 print("Underlying error: \(underlyingError)")
             }
-            completionHandler?()
-            completionHandler = nil
         }
     }
-    
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+}
+
+extension VoiceViewModel: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         if !flag {
             print("Audio playback finished unsuccessfully")
         }
-        completionHandler?()
-        completionHandler = nil
+        Task { @MainActor in
+            self.playbackContinuation?.resume()
+            self.playbackContinuation = nil
+        }
     }
     
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
-        completionHandler?()
-        completionHandler = nil
+        Task { @MainActor in
+            self.playbackContinuation?.resume()
+            self.playbackContinuation = nil
+        }
     }
 }

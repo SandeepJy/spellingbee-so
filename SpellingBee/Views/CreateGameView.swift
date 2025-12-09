@@ -4,8 +4,8 @@ struct CreateGameView: View {
     @EnvironmentObject var gameManager: GameManager
     @Binding var showCreateGameView: Bool
     @State private var selectedUsers = Set<SpellGameUser>()
-    @State private var selectedDifficulty = 2 // Default to medium
-    @State private var numberOfWords = 10 // Default word count
+    @State private var selectedDifficulty = 2
+    @State private var numberOfWords = 10
     @State private var isCreatingGame = false
     @State private var errorMessage: String?
     
@@ -14,7 +14,6 @@ struct CreateGameView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                // Header
                 HStack {
                     Text("Create New Game")
                         .font(.system(size: 28, weight: .bold))
@@ -29,7 +28,6 @@ struct CreateGameView: View {
                 
                 ScrollView {
                     VStack(spacing: 20) {
-                        // Select Players Section
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Select Players", systemImage: "person.2.fill")
                                 .font(.headline)
@@ -70,7 +68,6 @@ struct CreateGameView: View {
                         .background(Color(.systemGray6).opacity(0.5))
                         .cornerRadius(12)
                         
-                        // Difficulty Selection
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Difficulty Level", systemImage: "slider.horizontal.3")
                                 .font(.headline)
@@ -92,7 +89,6 @@ struct CreateGameView: View {
                         .background(Color(.systemGray6).opacity(0.5))
                         .cornerRadius(12)
                         
-                        // Number of Words Selection
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Number of Words", systemImage: "text.book.closed")
                                 .font(.headline)
@@ -124,7 +120,6 @@ struct CreateGameView: View {
                         .background(Color(.systemGray6).opacity(0.5))
                         .cornerRadius(12)
                         
-                        // Error Message
                         if let errorMessage = errorMessage {
                             HStack {
                                 Image(systemName: "exclamationmark.triangle.fill")
@@ -142,8 +137,11 @@ struct CreateGameView: View {
                     .padding(.horizontal)
                 }
                 
-                // Create Game Button
-                Button(action: createGame) {
+                Button(action: {
+                    Task {
+                        await createGame()
+                    }
+                }) {
                     HStack {
                         if isCreatingGame {
                             ProgressView()
@@ -191,7 +189,7 @@ struct CreateGameView: View {
         }
     }
     
-    private func createGame() {
+    private func createGame() async {
         guard let currentUser = gameManager.currentUser else { return }
         
         isCreatingGame = true
@@ -200,36 +198,29 @@ struct CreateGameView: View {
         var participantsIDs = selectedUsers.map { $0.id }
         participantsIDs.append(currentUser.id)
         
-        // Create the game with initial settings
-        gameManager.createGame(
+        guard let gameID = await gameManager.createGame(
             creatorID: currentUser.id,
             participantsIDs: Set(participantsIDs),
             difficulty: selectedDifficulty,
             wordCount: numberOfWords
-        ) { gameID in
-            // Generate words immediately after creating the game
-            if let gameID = gameID {
-                gameManager.generateWordsForGame(gameID: gameID, wordCount: numberOfWords, difficulty: selectedDifficulty) { result in
-                    DispatchQueue.main.async {
-                        self.isCreatingGame = false
-                        
-                        switch result {
-                        case .success:
-                            // Start the game automatically
-                            _ = gameManager.startGame(gameID: gameID)
-                            self.showCreateGameView = false
-                            
-                        case .failure(let error):
-                            self.errorMessage = "Failed to generate words: \(error.localizedDescription)"
-                        }
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    self.isCreatingGame = false
-                    self.errorMessage = "Failed to create game"
-                }
-            }
+        ) else {
+            isCreatingGame = false
+            errorMessage = "Failed to create game"
+            return
         }
+        
+        do {
+            _ = try await gameManager.generateWordsForGame(
+                gameID: gameID,
+                wordCount: numberOfWords,
+                difficulty: selectedDifficulty
+            )
+            _ = await gameManager.startGame(gameID: gameID)
+            showCreateGameView = false
+        } catch {
+            errorMessage = "Failed to generate words: \(error.localizedDescription)"
+        }
+        
+        isCreatingGame = false
     }
 }

@@ -1,11 +1,11 @@
 import Foundation
 
-struct UserGameProgress: Identifiable, Codable, Hashable {
+struct UserGameProgress: Identifiable, Codable, Hashable, Sendable {
     var id: String
     let userID: String
     let gameID: UUID
     var completedWordIndices: [Int]
-    var correctlySpelledWords: [String] // Track correctly spelled words
+    var correctlySpelledWords: [String]
     var currentWordIndex: Int
     var score: Int
     var lastUpdated: Date

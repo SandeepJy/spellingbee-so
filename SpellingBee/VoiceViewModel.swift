@@ -2,6 +2,7 @@
 import Foundation
 import AVFoundation
 
+@MainActor
 class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     var audioRecorder: AVAudioRecorder?
     var audioPlayer: AVAudioPlayer?
@@ -96,17 +97,21 @@ class VoiceViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if !flag {
-            print("Audio playback finished unsuccessfully")
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+            Task { @MainActor in
+                if !flag {
+                    print("Audio playback finished unsuccessfully")
+                }
+                completionHandler?()
+                completionHandler = nil
+            }
         }
-        completionHandler?()
-        completionHandler = nil
-    }
-    
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
-        completionHandler?()
-        completionHandler = nil
-    }
+        
+        nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+            Task { @MainActor in
+                print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
+                completionHandler?()
+                completionHandler = nil
+            }
+        }
 }

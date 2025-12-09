@@ -191,6 +191,7 @@ struct CreateGameView: View {
         }
     }
     
+    
     private func createGame() {
         guard let currentUser = gameManager.currentUser else { return }
         
@@ -200,34 +201,39 @@ struct CreateGameView: View {
         var participantsIDs = selectedUsers.map { $0.id }
         participantsIDs.append(currentUser.id)
         
-        // Create the game with initial settings
-        gameManager.createGame(
-            creatorID: currentUser.id,
-            participantsIDs: Set(participantsIDs),
-            difficulty: selectedDifficulty,
-            wordCount: numberOfWords
-        ) { gameID in
-            // Generate words immediately after creating the game
-            if let gameID = gameID {
-                gameManager.generateWordsForGame(gameID: gameID, wordCount: numberOfWords, difficulty: selectedDifficulty) { result in
-                    DispatchQueue.main.async {
+        Task {
+            do {
+                // Create the game with initial settings
+                if let gameID = await gameManager.createGame(
+                    creatorID: currentUser.id,
+                    participantsIDs: Set(participantsIDs),
+                    difficulty: selectedDifficulty,
+                    wordCount: numberOfWords
+                ) {
+                    // Generate words immediately after creating the game
+                    let _ = try await gameManager.generateWordsForGame(
+                        gameID: gameID,
+                        wordCount: numberOfWords,
+                        difficulty: selectedDifficulty
+                    )
+                    
+                    // Start the game automatically
+                    _ = await gameManager.startGame(gameID: gameID)
+                    
+                    await MainActor.run {
+                        self.showCreateGameView = false
                         self.isCreatingGame = false
-                        
-                        switch result {
-                        case .success:
-                            // Start the game automatically
-                            _ = gameManager.startGame(gameID: gameID)
-                            self.showCreateGameView = false
-                            
-                        case .failure(let error):
-                            self.errorMessage = "Failed to generate words: \(error.localizedDescription)"
-                        }
+                    }
+                } else {
+                    await MainActor.run {
+                        self.isCreatingGame = false
+                        self.errorMessage = "Failed to create game"
                     }
                 }
-            } else {
-                DispatchQueue.main.async {
+            } catch {
+                await MainActor.run {
                     self.isCreatingGame = false
-                    self.errorMessage = "Failed to create game"
+                    self.errorMessage = "Failed to generate words: \(error.localizedDescription)"
                 }
             }
         }

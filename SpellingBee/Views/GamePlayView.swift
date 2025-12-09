@@ -483,13 +483,15 @@ struct GamePlayView: View {
     }
     
     private func saveUserProgress() {
-        _ = gameManager.updateUserProgress(
-            gameID: game.id,
-            wordIndex: currentWordIndex,
-            completedWordIndices: completedWordIndices,
-            correctlySpelledWords: correctlySpelledWords,
-            score: score
-        )
+        Task {
+            _ = await gameManager.updateUserProgress(
+                gameID: game.id,
+                wordIndex: currentWordIndex,
+                completedWordIndices: completedWordIndices,
+                correctlySpelledWords: correctlySpelledWords,
+                score: score
+            )
+        }
     }
     
     private func findNextUncompletedWord() {

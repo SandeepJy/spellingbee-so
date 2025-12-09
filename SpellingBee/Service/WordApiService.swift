@@ -1,6 +1,6 @@
 import Foundation
 
-enum WordAPIError: Error {
+enum WordAPIError: Error, LocalizedError {
     case invalidURL
     case noData
     case decodingError
@@ -8,7 +8,7 @@ enum WordAPIError: Error {
     case networkError(Error)
     case insufficientWords
     
-    var localizedDescription: String {
+    var errorDescription: String? {
         switch self {
         case .invalidURL:
             return "Invalid URL"
@@ -26,154 +26,108 @@ enum WordAPIError: Error {
     }
 }
 
-class WordAPIService {
+actor WordAPIService {
     static let shared = WordAPIService()
     
     private init() {}
     
-    /// Fetches random words from the API
-    /// - Parameters:
-    ///   - count: Number of words to fetch
-    ///   - length: Length of words (default 5)
-    ///   - completion: Completion handler with result
-    func fetchRandomWords(count: Int = 10, length: Int = 5, completion: @escaping (Result<[String], WordAPIError>) -> Void) {
+    func fetchRandomWords(count: Int = 10, length: Int = 5) async throws -> [String] {
         let urlString = "https://random-word-api.vercel.app/api?words=\(count)&length=\(length)"
         
         guard let url = URL(string: urlString) else {
-            completion(.failure(.invalidURL))
-            return
+            throw WordAPIError.invalidURL
         }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let error = error {
-                completion(.failure(.networkError(error)))
-                return
-            }
-            
-            guard let data = data else {
-                completion(.failure(.noData))
-                return
-            }
-            
-            do {
-                let words = try JSONDecoder().decode([String].self, from: data)
-                completion(.success(words))
-            } catch {
-                print("Decoding error: \(error)")
-                completion(.failure(.decodingError))
-            }
-        }.resume()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        do {
+            return try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
     }
     
-    /// Fetches word details from Dictionary API
-    /// - Parameters:
-    ///   - word: The word to look up
-    ///   - completion: Completion handler with result
-    func fetchWordDetails(word: String, completion: @escaping (Result<DictionaryResponse, WordAPIError>) -> Void) {
+    func fetchWordDetails(word: String) async throws -> DictionaryResponse {
         let urlString = "https://api.dictionaryapi.dev/api/v2/entries/en/\(word)"
         
         guard let url = URL(string: urlString) else {
-            completion(.failure(.invalidURL))
-            return
+            throw WordAPIError.invalidURL
         }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let error = error {
-                completion(.failure(.networkError(error)))
-                return
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        do {
+            let responses = try JSONDecoder().decode([DictionaryResponse].self, from: data)
+            guard let firstResponse = responses.first else {
+                throw WordAPIError.noData
             }
-            
-            guard let data = data else {
-                completion(.failure(.noData))
-                return
-            }
-            
-            do {
-                let responses = try JSONDecoder().decode([DictionaryResponse].self, from: data)
-                if let firstResponse = responses.first {
-                    completion(.success(firstResponse))
-                } else {
-                    completion(.failure(.noData))
-                }
-            } catch {
-                print("Decoding error: \(error)")
-                completion(.failure(.decodingError))
-            }
-        }.resume()
+            return firstResponse
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
     }
     
-    /// Fetches random words with their details and audio URLs
-    /// - Parameters:
-    ///   - count: Number of words to fetch
-    ///   - length: Length of words
-    ///   - completion: Completion handler with array of words with details
-    func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5, completion: @escaping (Result<[(word: String, audioURL: String?, definition: String?)], WordAPIError>) -> Void) {
-        
-        // Request more words than needed to account for filtering
-        let requestCount = count * 3 // Request 3x to ensure we get enough with audio
+    func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5) async throws -> [(word: String, audioURL: String?, definition: String?)] {
+        let requestCount = count * 3 // Request more to ensure enough with audio
         
         print("🌐 Requesting \(requestCount) words from API to get \(count) with audio...")
         
-        fetchRandomWords(count: requestCount, length: length) { [weak self] result in
-            switch result {
-            case .success(let words):
-                print("📥 Received \(words.count) words from random word API")
-                
-                let group = DispatchGroup()
-                var wordsWithDetails: [(word: String, audioURL: String?, definition: String?)] = []
-                let lock = NSLock() // Thread-safe access to wordsWithDetails
-                
-                for word in words {
-                    group.enter()
-                    self?.fetchWordDetails(word: word) { detailResult in
-                        defer { group.leave() }
+        let words = try await fetchRandomWords(count: requestCount, length: length)
+        print("📥 Received \(words.count) words from random word API")
+        
+        var wordsWithDetails: [(word: String, audioURL: String?, definition: String?)] = []
+        
+        // Process words concurrently
+        await withTaskGroup(of: (String, String?, String?)?.self) { group in
+            for word in words {
+                group.addTask {
+                    do {
+                        let details = try await self.fetchWordDetails(word: word)
                         
-                        switch detailResult {
-                        case .success(let details):
-                            // Find the first phonetic with audio
-                            let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
-                            
-                            // Get the first definition
-                            let definition = details.meanings.first?.definitions.first?.definition
-                            
-                            // Only add if we have audio
-                            if audioURL != nil {
-                                lock.lock()
-                                wordsWithDetails.append((word: word, audioURL: audioURL, definition: definition))
-                                lock.unlock()
-                            }
-                            
-                        case .failure(let error):
-                            print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+                        // Find the first phonetic with audio
+                        let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
+                        
+                        // Get the first definition
+                        let definition = details.meanings.first?.definitions.first?.definition
+                        
+                        // Only return if we have audio
+                        if audioURL != nil {
+                            return (word, audioURL, definition)
                         }
+                        return nil
+                    } catch {
+                        print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+                        return nil
                     }
                 }
-                
-                group.notify(queue: .main) {
-                    print("✅ Found \(wordsWithDetails.count) words with audio (needed \(count))")
-                    
-                    // Take only the requested count
-                    let finalWords = Array(wordsWithDetails.prefix(count))
-                    
-                    if finalWords.count < count {
-                        print("⚠️ Warning: Only got \(finalWords.count) words with audio, needed \(count)")
-                        // Still return what we have rather than failing completely
-                        if finalWords.isEmpty {
-                            completion(.failure(.noAudioAvailable))
-                        } else {
-                            completion(.success(finalWords))
-                        }
-                    } else {
-                        print("🎉 Successfully returning \(finalWords.count) words:")
-                        finalWords.forEach { print("   - \($0.word)") }
-                        completion(.success(finalWords))
+            }
+            
+            for await result in group {
+                if let result = result {
+                    wordsWithDetails.append(result)
+                    if wordsWithDetails.count >= count {
+                        break
                     }
                 }
-                
-            case .failure(let error):
-                print("❌ Failed to fetch random words: \(error.localizedDescription)")
-                completion(.failure(error))
             }
         }
+        
+        print("✅ Found \(wordsWithDetails.count) words with audio (needed \(count))")
+        
+        let finalWords = Array(wordsWithDetails.prefix(count))
+        
+        if finalWords.count < count {
+            print("⚠️ Warning: Only got \(finalWords.count) words with audio, needed \(count)")
+            if finalWords.isEmpty {
+                throw WordAPIError.noAudioAvailable
+            }
+        }
+        
+        print("🎉 Successfully returning \(finalWords.count) words:")
+        finalWords.forEach { print("   - \($0.word)") }
+        
+        return finalWords
     }
 }

@@ -156,21 +156,55 @@ struct LoginRegisterView: View {
         }
         
         isLoading = true
-        
-        if isRegistering {
-            userManager.register(username: username, email: email, password: password) { result in
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.handleAuthResult(result)
+            
+            Task {
+                do {
+                    let user: SpellGameUser
+                    if isRegistering {
+                        user = try await userManager.register(username: username, email: email, password: password)
+                    } else {
+                        user = try await userManager.login(email: email, password: password)
+                    }
+                    
+                    await MainActor.run {
+                        self.isLoading = false
+                        print("Authentication successful for user: \(user.username)")
+                        
+                        // Clear form fields
+                        self.username = ""
+                        self.email = ""
+                        self.password = ""
+                        self.errorMessage = nil
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isLoading = false
+                        self.handleError(error)
+                    }
                 }
+            }
+    }
+    
+    private func handleError(_ error: Error) {
+        if let authError = error as NSError? {
+            switch authError.code {
+            case 17007:
+                errorMessage = "An account with this email already exists."
+            case 17008:
+                errorMessage = "Please enter a valid email address."
+            case 17026:
+                errorMessage = "Password is too weak. Please choose a stronger password."
+            case 17011:
+                errorMessage = "No account found with this email."
+            case 17009:
+                errorMessage = "Incorrect password. Please try again."
+            case 17020:
+                errorMessage = "Network error. Please check your connection."
+            default:
+                errorMessage = error.localizedDescription
             }
         } else {
-            userManager.login(email: email, password: password) { result in
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.handleAuthResult(result)
-                }
-            }
+            errorMessage = error.localizedDescription
         }
     }
     

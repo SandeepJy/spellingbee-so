@@ -135,7 +135,7 @@ struct MainView: View {
             )
             .navigationBarHidden(true)
             .refreshable {
-                gameManager.loadData()
+                await gameManager.loadData()
             }
         }
     }

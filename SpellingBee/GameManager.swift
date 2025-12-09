@@ -1,4 +1,3 @@
-
 import Foundation
 import SwiftUI
 import Firebase
@@ -7,28 +6,25 @@ import FirebaseStorage
 import AVFoundation
 import Combine
 
-
-class GameManager: ObservableObject {
-    @Published var users: [SpellGameUser] = []  // List of available users
-    @Published private(set) var currentUser: SpellGameUser?  // Currently logged-in user
-    @Published var games: [MultiUserGame] = []  // List of all games
-    @Published var userGameProgresses: [UserGameProgress] = []  // List of user game progress records
+@MainActor
+final class GameManager: ObservableObject {
+    @Published var users: [SpellGameUser] = []
+    @Published private(set) var currentUser: SpellGameUser?
+    @Published var games: [MultiUserGame] = []
+    @Published var userGameProgresses: [UserGameProgress] = []
     @Published var isDataLoaded = false
     
-    private var db = Firestore.firestore()
-    private var storage = Storage.storage()
+    private let db = Firestore.firestore()
+    private let storage = Storage.storage()
     private var userManager: UserManager?
     private var gamesListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
+    private var cancellables = Set<AnyCancellable>()
     
     init() {
-        // Note: Data loading will be triggered when user is authenticated
+        // Data loading will be triggered when user is authenticated
     }
     
-    /**
-     * Sets the user manager reference and sets up observers by listening to
-     * current user and authentication state changes
-     */
     func setUserManager(_ userManager: UserManager) {
         self.userManager = userManager
         
@@ -38,60 +34,43 @@ class GameManager: ObservableObject {
             .sink { [weak self] (isAuthenticated, user) in
                 guard let self = self else { return }
                 
-                self.currentUser = user
-                
-                if isAuthenticated && user != nil {
-                    // User is authenticated and we have their details
-                    if !self.isDataLoaded {
-                        self.loadData()
-                        self.setupRealtimeListeners()
+                Task { @MainActor in
+                    self.currentUser = user
+                    
+                    if isAuthenticated && user != nil {
+                        // User is authenticated and we have their details
+                        if !self.isDataLoaded {
+                            await self.loadData()
+                            await self.setupRealtimeListeners()
+                        }
+                    } else if !isAuthenticated {
+                        // User is not authenticated, clear all data
+                        await self.clearData()
                     }
-                } else if !isAuthenticated {
-                    // User is not authenticated, clear all data
-                    self.clearData()
                 }
             }
             .store(in: &cancellables)
     }
     
-    private var cancellables = Set<AnyCancellable>()
+    // MARK: - Async Data Loading Methods
     
-    /**
-     * Loads all data from Firestore (only called after authentication)
-     */
-    func loadData() {
+    func loadData() async {
         guard userManager?.isAuthenticated == true else {
             print("Cannot load data: User not authenticated")
             return
         }
         
-        let dispatchGroup = DispatchGroup()
-        
-        dispatchGroup.enter()
-        loadUsers {
-            dispatchGroup.leave()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.loadUsers() }
+            group.addTask { await self.loadGames() }
+            group.addTask { await self.loadUserGameProgresses() }
         }
         
-        dispatchGroup.enter()
-        loadGames {
-            dispatchGroup.leave()
-        }
-        
-        dispatchGroup.enter()
-        loadUserGameProgresses {
-            dispatchGroup.leave()
-        }
-        
-        dispatchGroup.notify(queue: .main) {
-            self.isDataLoaded = true
-            print("All data loaded successfully")
-        }
+        isDataLoaded = true
+        print("All data loaded successfully")
     }
     
-    /**
-     * Clears all data when user logs out
-     */
-    private func clearData() {
+    private func clearData() async {
         users = []
         games = []
         userGameProgresses = []
@@ -105,73 +84,46 @@ class GameManager: ObservableObject {
         progressListener = nil
     }
     
-    func getDocumentsDirectory() -> URL {
-        let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
-        return paths[0]
-    }
+    // MARK: - Audio Methods
     
-    func uploadAudio(gameID: UUID, url: URL, word: String, completion: @escaping (String?) -> Void) {
-        guard userManager?.isAuthenticated == true else {
-            completion(nil)
-            return
-        }
-        
-        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
-        let uploadTask = storageRef.putFile(from: url, metadata: nil) { metadata, error in
-            if let error = error {
-                print("Error uploading audio: \(error)")
-                completion(nil)
-            } else {
-                storageRef.downloadURL { (downloadURL, error) in
-                    guard let downloadURL = downloadURL else {
-                        completion(nil)
-                        return
-                    }
-                    completion(downloadURL.absoluteString)
-                }
-            }
-        }
-    }
+//    func uploadAudio(gameID: UUID, url: URL, word: String) async -> String? {
+//        guard userManager?.isAuthenticated == true else {
+//            return nil
+//        }
+//        
+//        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
+//        
+//        do {
+//            _ = try await storageRef.putFileAsync(from: url)
+//            let downloadURL = try await storageRef.downloadURL()
+//            return downloadURL.absoluteString
+//        } catch {
+//            print("Error uploading audio: \(error)")
+//            return nil
+//        }
+//    }
+//    
+//    func downloadAudio(gameID: UUID, word: String) async -> URL? {
+//        guard userManager?.isAuthenticated == true else {
+//            return nil
+//        }
+//        
+//        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
+//        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+//        let fileURL = documentsURL.appendingPathComponent("\(gameID)\(word).m4a")
+//        
+//        do {
+//            let url = try await storageRef.writeAsync(toFile: fileURL)
+//            return url
+//        } catch {
+//            print("Error downloading audio: \(error)")
+//            return nil
+//        }
+//    }
     
-    func downloadAudio(gameID: UUID, word: String, completion: @escaping (URL?) -> Void ) {
-        guard userManager?.isAuthenticated == true else {
-            completion(nil)
-            return
-        }
-        
-        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let fileURL = documentsURL.appendingPathComponent("\(gameID)\(word).m4a")
-        
-        storageRef.write(toFile: fileURL) { url, error in
-            if let error = error {
-                print("Error downloading audio: \(error)")
-                completion(nil)
-            } else {
-                completion(url)
-            }
-        }
-    }
-
-    /**
-     * Sets the current user - this is now handled automatically by auth state listener
-     * This method is kept for compatibility but shouldn't be called directly
-     */
-    @available(*, deprecated, message: "Current user is now set automatically via auth state listener")
-    func setCurrentUser(_ user: SpellGameUser) {
-        // This is now handled automatically by the UserManager auth state listener
-        // Keeping this method for backward compatibility
-        print("Warning: setCurrentUser is deprecated, user is set automatically via auth state")
-    }
+    // MARK: - User Management
     
-   /**
-     * Adds a new user to the system
-     *
-     * @param id Unique identifier for the user
-     * @param username Display name for the user
-     * @param email User's email address
-     */
-    func addUser(id: String, username: String, email: String) {
+    func addUser(id: String, username: String, email: String) async {
         guard userManager?.isAuthenticated == true else {
             print("Cannot add user: Not authenticated")
             return
@@ -179,18 +131,15 @@ class GameManager: ObservableObject {
         
         let newUser = SpellGameUser(id: id, username: username, email: email)
         users.append(newUser)
-        saveUser(newUser)
+        await saveUser(newUser)
     }
     
-    /**
-     * Creates a new game with specified creator and participants
-     * Now includes difficulty and word count
-     */
-    func createGame(creatorID: String, participantsIDs: Set<String>, difficulty: Int = 2, wordCount: Int = 10, completion: ((UUID?) -> Void)? = nil) {
+    // MARK: - Game Management
+    
+    func createGame(creatorID: String, participantsIDs: Set<String>, difficulty: Int = 2, wordCount: Int = 10) async -> UUID? {
         guard userManager?.isAuthenticated == true else {
             print("Cannot create game: Not authenticated")
-            completion?(nil)
-            return
+            return nil
         }
         
         let newGame = MultiUserGame(
@@ -206,23 +155,17 @@ class GameManager: ObservableObject {
         )
         
         games.append(newGame)
-        saveGame(newGame)
-        completion?(newGame.id)
+        await saveGame(newGame)
+        return newGame.id
     }
     
-    /**
-     * Generates random words for a game using the API
-     * Updated to support difficulty-based word length
-     */
-    func generateWordsForGame(gameID: UUID, wordCount: Int, difficulty: Int, completion: @escaping (Result<[Word], Error>) -> Void) {
+    func generateWordsForGame(gameID: UUID, wordCount: Int, difficulty: Int) async throws -> [Word] {
         guard userManager?.isAuthenticated == true else {
-            completion(.failure(NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])))
-            return
+            throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
         }
         
         guard let gameIndex = games.firstIndex(where: { $0.id == gameID }) else {
-            completion(.failure(NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])))
-            return
+            throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
         }
         
         print("🎲 Generating \(wordCount) words for game...")
@@ -240,91 +183,38 @@ class GameManager: ObservableObject {
             wordLength = 5
         }
         
-        // Fetch random words with audio - REQUEST THE CORRECT COUNT
-        WordAPIService.shared.fetchRandomWordsWithDetails(count: wordCount, length: wordLength) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                
-                switch result {
-                case .success(let wordsData):
-                    print("✅ Successfully fetched \(wordsData.count) words from API")
-                    
-                    // Create Word objects from the API data
-                    let words = wordsData.map { wordData in
-                        Word(
-                            word: wordData.word,
-                            soundURL: wordData.audioURL != nil ? URL(string: wordData.audioURL!) : nil,
-                            level: difficulty,
-                            createdByID: "system", // Mark as system-generated
-                            gameID: gameID
-                        )
-                    }
-                    
-                    print("📝 Created \(words.count) Word objects")
-                    print("   Words: \(words.map { $0.word })")
-                    
-                    // Update game with generated words
-                    self.games[gameIndex].words = words
-                    self.games[gameIndex].hasGeneratedWords = true
-                    self.games[gameIndex].isStarted = true // Auto-start the game
-                    
-                    // Important: Save the game to Firestore
-                    self.saveGame(self.games[gameIndex])
-                    
-                    print("💾 Game saved with \(self.games[gameIndex].words.count) words")
-                    
-                    completion(.success(words))
-                    
-                case .failure(let error):
-                    print("❌ Failed to fetch words: \(error.localizedDescription)")
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-
-    /**
-     * Gets user's correctly spelled word count for a game
-     */
-    func getCorrectWordCount(for gameID: UUID, userID: String? = nil) -> Int {
-        let targetUserID = userID ?? currentUser?.id
-        guard let targetUserID = targetUserID else { return 0 }
+        // Fetch random words with audio
+        let wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(count: wordCount, length: wordLength)
         
-        if let progress = getUserProgress(for: gameID, userID: targetUserID) {
-            return progress.correctlySpelledWords.count
+        print("✅ Successfully fetched \(wordsData.count) words from API")
+        
+        // Create Word objects from the API data
+        let words = wordsData.map { wordData in
+            Word(
+                word: wordData.word,
+                soundURL: wordData.audioURL != nil ? URL(string: wordData.audioURL!) : nil,
+                level: difficulty,
+                createdByID: "system",
+                gameID: gameID
+            )
         }
-        return 0
+        
+        print("📝 Created \(words.count) Word objects")
+        
+        // Update game with generated words
+        games[gameIndex].words = words
+        games[gameIndex].hasGeneratedWords = true
+        games[gameIndex].isStarted = true
+        
+        // Save the game to Firestore
+        await saveGame(games[gameIndex])
+        
+        print("💾 Game saved with \(games[gameIndex].words.count) words")
+        
+        return words
     }
     
-   /**
-     * Adds words to an existing game
-     *
-     * @param gameID The game ID to update
-     * @param words List of words to add to the game
-     * @return Boolean indicating success
-     */
-    func addWords(to gameID: UUID, words: [Word]) -> Bool {
-        guard userManager?.isAuthenticated == true else {
-            print("Cannot add words: Not authenticated")
-            return false
-        }
-        
-        guard let index = games.firstIndex(where: { $0.id == gameID }) else {
-            return false
-        }
-        
-        games[index].words.append(contentsOf: words)
-        saveGame(games[index])
-        return true
-    }
-    
-    /**
-     * Marks a game as started
-     *
-     * @param gameID The game ID to start
-     * @return Boolean indicating success
-     */
-    func startGame(gameID: UUID) -> Bool {
+    func startGame(gameID: UUID) async -> Bool {
         guard userManager?.isAuthenticated == true else {
             print("Cannot start game: Not authenticated")
             return false
@@ -335,32 +225,24 @@ class GameManager: ObservableObject {
         }
         
         games[index].isStarted = true
-        saveGame(games[index])
+        await saveGame(games[index])
         return true
     }
     
-     /**
-     * Loads users from Firestore with completion handler
-     */
-    private func loadUsers(completion: @escaping () -> Void) {
-        db.collection("users").getDocuments { (querySnapshot, error) in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error loading users: \(error)")
-                } else {
-                    self.users = querySnapshot?.documents.compactMap { document in
-                        try? document.data(as: SpellGameUser.self)
-                    } ?? []
-                }
-                completion()
+    // MARK: - Private Firestore Methods
+    
+    private func loadUsers() async {
+        do {
+            let querySnapshot = try await db.collection("users").getDocuments()
+            self.users = querySnapshot.documents.compactMap { document in
+                try? document.data(as: SpellGameUser.self)
             }
+        } catch {
+            print("Error loading users: \(error)")
         }
     }
     
-    /**
-     * Saves a single user to Firestore
-     */
-    private func saveUser(_ user: SpellGameUser) {
+    private func saveUser(_ user: SpellGameUser) async {
         do {
             try db.collection("users").document(user.id).setData(from: user)
         } catch {
@@ -368,47 +250,23 @@ class GameManager: ObservableObject {
         }
     }
     
-    /**
-     * Saves all users to Firestore (kept for backward compatibility)
-     */
-    func saveUsers() {
-        guard userManager?.isAuthenticated == true else {
-            print("Cannot save users: Not authenticated")
-            return
-        }
-        
-        for user in users {
-            saveUser(user)
-        }
-    }
-    
-    /**
-     * Loads games from Firestore with completion handler
-     */
-    private func loadGames(completion: @escaping () -> Void) {
-        db.collection("games").getDocuments { (querySnapshot, error) in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error loading games: \(error)")
-                } else {
-                    self.games = querySnapshot?.documents.compactMap { document in
-                        let game = try? document.data(as: MultiUserGame.self)
-                        if let game = game {
-                            print("📦 Loaded game \(game.id) with \(game.words.count) words")
-                        }
-                        return game
-                    } ?? []
-                    print("📦 Total games loaded: \(self.games.count)")
+    private func loadGames() async {
+        do {
+            let querySnapshot = try await db.collection("games").getDocuments()
+            self.games = querySnapshot.documents.compactMap { document in
+                let game = try? document.data(as: MultiUserGame.self)
+                if let game = game {
+                    print("📦 Loaded game \(game.id) with \(game.words.count) words")
                 }
-                completion()
+                return game
             }
+            print("📦 Total games loaded: \(self.games.count)")
+        } catch {
+            print("Error loading games: \(error)")
         }
     }
     
-    /**
-     * Saves a single game to Firestore
-     */
-    private func saveGame(_ game: MultiUserGame) {
+    private func saveGame(_ game: MultiUserGame) async {
         do {
             try db.collection("games").document(game.id.uuidString).setData(from: game)
             print("💾 Saved game \(game.id) to Firestore with \(game.words.count) words")
@@ -417,29 +275,27 @@ class GameManager: ObservableObject {
         }
     }
     
-    /**
-     * Saves all games to Firestore (kept for backward compatibility)
-     */
-    func saveGames() {
-        guard userManager?.isAuthenticated == true else {
-            print("Cannot save games: Not authenticated")
-            return
+    private func loadUserGameProgresses() async {
+        do {
+            let querySnapshot = try await db.collection("userGameProgresses").getDocuments()
+            self.userGameProgresses = querySnapshot.documents.compactMap { document in
+                try? document.data(as: UserGameProgress.self)
+            }
+        } catch {
+            print("Error loading user game progresses: \(error)")
         }
-        
-        for game in games {
-            saveGame(game)
+    }
+    
+    private func saveUserGameProgress(_ progress: UserGameProgress) async {
+        do {
+            try db.collection("userGameProgresses").document(progress.id).setData(from: progress)
+        } catch {
+            print("Error saving user game progress: \(error)")
         }
     }
     
     // MARK: - User Game Progress Methods
     
-    /**
-     * Gets user progress for a specific game
-     *
-     * @param gameID The game to get progress for
-     * @param userID The user whose progress to retrieve (defaults to current user)
-     * @return UserGameProgress if exists, nil otherwise
-     */
     func getUserProgress(for gameID: UUID, userID: String? = nil) -> UserGameProgress? {
         let targetUserID = userID ?? currentUser?.id
         guard let targetUserID = targetUserID else { return nil }
@@ -453,7 +309,7 @@ class GameManager: ObservableObject {
                             completedWordIndices: [Int],
                             correctlySpelledWords: [String],
                             score: Int,
-                            userID: String? = nil) -> Bool {
+                            userID: String? = nil) async -> Bool {
         let targetUserID = userID ?? currentUser?.id
         guard let targetUserID = targetUserID else { return false }
         
@@ -465,7 +321,7 @@ class GameManager: ObservableObject {
             userGameProgresses[existingIndex].correctlySpelledWords = correctlySpelledWords
             userGameProgresses[existingIndex].score = score
             userGameProgresses[existingIndex].lastUpdated = Date()
-            saveUserGameProgress(userGameProgresses[existingIndex])
+            await saveUserGameProgress(userGameProgresses[existingIndex])
             return true
         } else {
             let newProgress = UserGameProgress(
@@ -478,64 +334,14 @@ class GameManager: ObservableObject {
                 lastUpdated: Date()
             )
             userGameProgresses.append(newProgress)
-            saveUserGameProgress(newProgress)
+            await saveUserGameProgress(newProgress)
             return true
         }
     }
     
-    /**
-     * Loads user game progress from Firestore with completion handler
-     */
-    private func loadUserGameProgresses(completion: @escaping () -> Void) {
-        db.collection("userGameProgresses").getDocuments { (querySnapshot, error) in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error loading user game progresses: \(error)")
-                } else {
-                    self.userGameProgresses = querySnapshot?.documents.compactMap { document in
-                        try? document.data(as: UserGameProgress.self)
-                    } ?? []
-                }
-                completion()
-            }
-        }
-    }
+    // MARK: - Realtime Listeners
     
-    /**
-     * Saves a single user game progress to Firestore
-     */
-    private func saveUserGameProgress(_ progress: UserGameProgress) {
-        do {
-            try db.collection("userGameProgresses").document(progress.id).setData(from: progress)
-        } catch {
-            print("Error saving user game progress: \(error)")
-        }
-    }
-    
-    // MARK: - Utility Methods
-    
-    //Gets user object given a User ID
-    func getUser(by id: String) -> SpellGameUser? {
-        return users.first { $0.id == id }
-    }
-    
-    //Gets display names for all participants
-    func getParticipantNames(for game: MultiUserGame) -> [String] {
-        return game.participantsIDs.compactMap { getUser(by: $0)?.displayName }
-    }
-    
-    //Gets the display name of the creator
-    func getCreatorName(for game: MultiUserGame) -> String? {
-        return getUser(by: game.creatorID)?.displayName
-    }
-    
-    // MARK: - Reactive Data Loading
-    
-    /**
-     * Sets up real-time listeners for Firestore collections
-     * This ensures data stays synchronized across devices
-     */
-    func setupRealtimeListeners() {
+    func setupRealtimeListeners() async {
         guard userManager?.isAuthenticated == true else {
             print("Cannot setup listeners: Not authenticated")
             return
@@ -550,7 +356,7 @@ class GameManager: ObservableObject {
                 return
             }
             
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.users = documents.compactMap { document in
                     try? document.data(as: SpellGameUser.self)
                 }
@@ -564,7 +370,7 @@ class GameManager: ObservableObject {
                 return
             }
             
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 let newGames = documents.compactMap { document -> MultiUserGame? in
                     let game = try? document.data(as: MultiUserGame.self)
                     if let game = game {
@@ -584,7 +390,7 @@ class GameManager: ObservableObject {
                 return
             }
             
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.userGameProgresses = documents.compactMap { document in
                     try? document.data(as: UserGameProgress.self)
                 }
@@ -592,25 +398,28 @@ class GameManager: ObservableObject {
             }
         }
     }
-
-    /**
-     * Sets the difficulty level for a game
-     *
-     * @param gameID The game to update
-     * @param level Difficulty level (1-5)
-     * @return Boolean indicating success
-     */
-    func setGameDifficulty(gameID: UUID, level: Int) -> Bool {
-        guard userManager?.isAuthenticated == true else {
-            return false
-        }
+    
+    // MARK: - Utility Methods
+    
+    func getUser(by id: String) -> SpellGameUser? {
+        return users.first { $0.id == id }
+    }
+    
+    func getParticipantNames(for game: MultiUserGame) -> [String] {
+        return game.participantsIDs.compactMap { getUser(by: $0)?.displayName }
+    }
+    
+    func getCreatorName(for game: MultiUserGame) -> String? {
+        return getUser(by: game.creatorID)?.displayName
+    }
+    
+    func getCorrectWordCount(for gameID: UUID, userID: String? = nil) -> Int {
+        let targetUserID = userID ?? currentUser?.id
+        guard let targetUserID = targetUserID else { return 0 }
         
-        guard let index = games.firstIndex(where: { $0.id == gameID }) else {
-            return false
+        if let progress = getUserProgress(for: gameID, userID: targetUserID) {
+            return progress.correctlySpelledWords.count
         }
-        
-        games[index].difficultyLevel = max(1, min(5, level)) // Clamp between 1-5
-        saveGame(games[index])
-        return true
+        return 0
     }
 }

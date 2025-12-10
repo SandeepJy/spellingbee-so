@@ -1,0 +1,2737 @@
+## File: ContentView.swift
+
+```swift
+import SwiftUI
+import AVFoundation
+import Firebase
+import FirebaseAuth
+import FirebaseFirestore
+import FirebaseStorage
+
+struct MainView: View {
+    @EnvironmentObject var gameManager: GameManager
+    @EnvironmentObject var userManager: UserManager
+    @State private var showCreateGameView = false
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Header
+                    HStack {
+                        Text("Spelling Bee")
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(.primary)
+                        Spacer()
+                        
+                        Button(action: {
+                            // TODO: Add profile/settings action
+                        }) {
+                            Circle()
+                                .fill(Color.blue.opacity(0.1))
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Text(gameManager.currentUser?.initialLetter ?? "U")
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.blue)
+                                )
+                        }
+                        
+                        Button(action: {
+                            userManager.signOut()
+                        }) {
+                            Image(systemName: "arrow.right.square")
+                                .font(.title2)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    if let user = gameManager.currentUser {
+                        Text("Welcome back, \(user.displayName)!")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                            .animation(.easeInOut, value: user.username)
+                    }
+                    
+                    if !gameManager.isDataLoaded {
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Loading your games...")
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(minHeight: 200)
+                    } else {
+                        Button(action: { showCreateGameView = true }) {
+                            HStack {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Start New Game")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(
+                                LinearGradient(gradient: Gradient(colors: [.green, .blue]),
+                                               startPoint: .leading,
+                                               endPoint: .trailing)
+                            )
+                            .cornerRadius(15)
+                            .shadow(radius: 5)
+                        }
+                        .sheet(isPresented: $showCreateGameView) {
+                            CreateGameView(showCreateGameView: $showCreateGameView)
+                                .environmentObject(gameManager)
+                        }
+                        .padding(.horizontal)
+                        
+                        let userGames = gameManager.games.filter {
+                            $0.creatorID == gameManager.currentUser?.id ||
+                            $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")
+                        }.sorted { $0.creationDate > $1.creationDate }
+                        
+                        if userGames.isEmpty {
+                            VStack(spacing: 20) {
+                                Image(systemName: "gamecontroller")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.gray)
+                                Text("No games yet")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.primary)
+                                Text("Create your first spelling bee game to get started!")
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(minHeight: 200)
+                            .padding()
+                        } else {
+                            VStack(spacing: 15) {
+                                ForEach(userGames) { game in
+                                    GameCardView(gameID: game.id)
+                                        .environmentObject(gameManager)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                }
+                .padding(.vertical)
+            }
+            .background(
+                Color(.systemBackground)
+                    .overlay(
+                        Image("SpellingBee")
+                            .resizable()
+                            .scaledToFit()
+                            .opacity(0.05)
+                    )
+            )
+            .navigationBarHidden(true)
+            .refreshable {
+                await gameManager.loadData()
+            }
+        }
+    }
+}
+
+// MARK: - Score Progress Bar for Game Card
+struct UserScoreProgressBar: View {
+    let currentScore: Int
+    let bestPossibleScore: Int
+    let userName: String
+    let correctCount: Int
+    let totalWords: Int
+    
+    private var progress: Double {
+        guard bestPossibleScore > 0 else { return 0 }
+        return min(Double(currentScore) / Double(bestPossibleScore), 1.0)
+    }
+    
+    private var progressColor: Color {
+        if progress >= 0.8 {
+            return .green
+        } else if progress >= 0.5 {
+            return .blue
+        } else if progress >= 0.3 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.2))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Text(String(userName.prefix(1)).uppercased())
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                    )
+                
+                Text(userName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                Spacer()
+                
+                Text("\(currentScore) pts")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(progressColor)
+                
+                Text("(\(correctCount)/\(totalWords))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 8)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [progressColor.opacity(0.7), progressColor]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(0, geometry.size.width * progress), height: 8)
+                        .animation(.easeInOut(duration: 0.5), value: progress)
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+}
+
+struct GameCardView: View {
+    @EnvironmentObject var gameManager: GameManager
+    let gameID: UUID
+    
+    private var game: MultiUserGame? {
+        gameManager.games.first { $0.id == gameID }
+    }
+    
+    private var bestPossibleScore: Int {
+        return (game?.wordCount ?? 0) * 90
+    }
+    
+    var body: some View {
+        if let game = game {
+            NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(game.difficultyText)
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(difficultyColor)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                            
+                            Text("Created by \(gameManager.getCreatorName(for: game) ?? "Unknown")")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Active")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.green.opacity(0.2))
+                                .foregroundColor(.green)
+                                .cornerRadius(8)
+                            
+                            Text(formattedDate)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    HStack(spacing: 30) {
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "person.2.fill")
+                                    .foregroundColor(.blue)
+                                Text("\(game.participantsIDs.count)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Players")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "text.book.closed.fill")
+                                    .foregroundColor(.orange)
+                                Text("\(game.wordCount)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Words")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "star.fill")
+                                    .foregroundColor(.yellow)
+                                Text("\(bestPossibleScore)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Max Pts")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    if game.hasGeneratedWords {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Player Scores")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.secondary)
+                                
+                                Spacer()
+                                
+                                Text("Best: \(bestPossibleScore) pts")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            ForEach(Array(game.participantsIDs), id: \.self) { participantID in
+                                if let participant = gameManager.getUser(by: participantID) {
+                                    let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
+                                    let score = progress?.score ?? 0
+                                    let correctCount = progress?.correctlySpelledWords.count ?? 0
+                                    
+                                    UserScoreProgressBar(
+                                        currentScore: score,
+                                        bestPossibleScore: bestPossibleScore,
+                                        userName: participant.displayName,
+                                        correctCount: correctCount,
+                                        totalWords: game.wordCount
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 15)
+                        .fill(Color(.systemGray6))
+                        .shadow(color: Color.gray.opacity(0.2), radius: 5)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 15)
+                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
+    private var difficultyColor: Color {
+        guard let game = game else { return .orange }
+        switch game.difficultyLevel {
+        case 1: return .green
+        case 2: return .orange
+        case 3: return .red
+        default: return .orange
+        }
+    }
+    
+    private var formattedDate: String {
+        guard let game = game else { return "" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: game.creationDate, relativeTo: Date())
+    }
+}
+
+struct PlayerProgressRow: View {
+    let participant: SpellGameUser
+    let correctCount: Int
+    let totalCount: Int
+    
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.blue.opacity(0.2))
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Text(participant.initialLetter)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                    )
+                Text(participant.displayName)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            HStack(spacing: 4) {
+                Text("\(correctCount)/\(totalCount)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(correctCount == totalCount ? .green : .primary)
+                
+                if correctCount == totalCount {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+            }
+        }
+    }
+}
+
+struct StatusBadge: View {
+    let isStarted: Bool
+    
+    var body: some View {
+        Text(isStarted ? "Active" : "Pending")
+            .font(.caption)
+            .fontWeight(.bold)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isStarted ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
+            .foregroundColor(isStarted ? .green : .orange)
+            .cornerRadius(8)
+    }
+}
+
+struct WordProgressRow: View {
+    let participant: SpellGameUser
+    let game: MultiUserGame
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(participant.displayName)
+                .font(.caption)
+                .foregroundColor(.primary)
+                .frame(width: 80, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            
+            ProgressView(value: Double(wordCount), total: 5.0)
+                .progressViewStyle(LinearProgressViewStyle(tint: wordCount == 5 ? .green : .blue))
+                .frame(height: 8)
+            
+            Text("\(wordCount)/5")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(width: 30)
+        }
+    }
+    
+    private var wordCount: Int {
+        game.words.filter { $0.createdByID == participant.id }.count
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var userManager = UserManager()
+    @StateObject private var gameManager = GameManager()
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        NavigationView {
+            Group {
+                if userManager.isAuthenticated && gameManager.currentUser != nil {
+                    MainView()
+                        .environmentObject(userManager)
+                        .environmentObject(gameManager)
+                        .transition(.opacity)
+                } else {
+                    LoginRegisterView()
+                        .environmentObject(userManager)
+                        .environmentObject(gameManager)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .preferredColorScheme(colorScheme)
+        .animation(.easeInOut(duration: 0.3), value: userManager.isAuthenticated)
+        .onAppear {
+            gameManager.setUserManager(userManager)
+        }
+    }
+}
+
+struct ParticipantRow: View {
+    let participant: SpellGameUser?
+    let game: MultiUserGame
+    
+    var body: some View {
+        if let participant = participant {
+            HStack {
+                Text(participant.displayName)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+                Text("\(wordCount)/5 words")
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    private var wordCount: Int {
+        game.words.filter { $0.createdByID == participant?.id }.count
+    }
+}
+
+#Preview {
+    ContentView()
+}
+```
+
+---
+
+## File: GameManager.swift
+
+```swift
+import Foundation
+import SwiftUI
+import Firebase
+import FirebaseFirestore
+import FirebaseStorage
+import AVFoundation
+
+@MainActor
+final class GameManager: ObservableObject {
+    @Published var users: [SpellGameUser] = []
+    @Published private(set) var currentUser: SpellGameUser?
+    @Published var games: [MultiUserGame] = []
+    @Published var userGameProgresses: [UserGameProgress] = []
+    @Published var isDataLoaded = false
+    
+    private let db = Firestore.firestore()
+    private let storage = Storage.storage()
+    private var userManager: UserManager?
+    private var gamesListener: ListenerRegistration?
+    private var progressListener: ListenerRegistration?
+    private var usersListener: ListenerRegistration?
+    
+    init() {}
+    
+    func setUserManager(_ userManager: UserManager) {
+        self.userManager = userManager
+        
+        // Observe auth changes
+        Task {
+            for await _ in userManager.$isAuthenticated.values {
+                await handleAuthChange(userManager: userManager)
+            }
+        }
+    }
+    
+    private func handleAuthChange(userManager: UserManager) async {
+        self.currentUser = userManager.currentUser
+        
+        if userManager.isAuthenticated && userManager.currentUser != nil {
+            if !isDataLoaded {
+                await loadData()
+                setupRealtimeListeners()
+            }
+        } else if !userManager.isAuthenticated {
+            clearData()
+        }
+    }
+    
+    func loadData() async {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot load data: User not authenticated")
+            return
+        }
+        
+        async let usersResult: () = loadUsers()
+        async let gamesResult: () = loadGames()
+        async let progressResult: () = loadUserGameProgresses()
+        
+        _ = await (usersResult, gamesResult, progressResult)
+        
+        isDataLoaded = true
+        print("All data loaded successfully")
+    }
+    
+    private func clearData() {
+        users = []
+        games = []
+        userGameProgresses = []
+        currentUser = nil
+        isDataLoaded = false
+        
+        gamesListener?.remove()
+        progressListener?.remove()
+        usersListener?.remove()
+        gamesListener = nil
+        progressListener = nil
+        usersListener = nil
+    }
+    
+    nonisolated func getDocumentsDirectory() -> URL {
+        let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        return paths[0]
+    }
+        
+    func addUser(id: String, username: String, email: String) async {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot add user: Not authenticated")
+            return
+        }
+        
+        let newUser = SpellGameUser(id: id, username: username, email: email)
+        users.append(newUser)
+        await saveUser(newUser)
+    }
+    
+    func createGame(creatorID: String, participantsIDs: Set<String>, difficulty: Int = 2, wordCount: Int = 10) async -> UUID? {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot create game: Not authenticated")
+            return nil
+        }
+        
+        let newGame = MultiUserGame(
+            id: UUID(),
+            creatorID: creatorID,
+            participantsIDs: participantsIDs,
+            words: [],
+            isStarted: false,
+            hasGeneratedWords: false,
+            difficultyLevel: difficulty,
+            wordCount: wordCount,
+            creationDate: Date()
+        )
+        
+        games.append(newGame)
+        await saveGame(newGame)
+        return newGame.id
+    }
+    
+    func generateWordsForGame(gameID: UUID, wordCount: Int, difficulty: Int) async throws -> [Word] {
+        guard userManager?.isAuthenticated == true else {
+            throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+        }
+        
+        guard let gameIndex = games.firstIndex(where: { $0.id == gameID }) else {
+            throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
+        }
+        
+        print("🎲 Generating \(wordCount) words for game...")
+        
+        let wordLength: Int
+        switch difficulty {
+        case 1:
+            wordLength = Int.random(in: 3...4)
+        case 2:
+            wordLength = 5
+        case 3:
+            wordLength = Int.random(in: 5...6)
+        default:
+            wordLength = 5
+        }
+        
+        let wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(count: wordCount, length: wordLength)
+        
+        print("✅ Successfully fetched \(wordsData.count) words from API")
+        
+        let words = wordsData.map { wordData in
+            Word(
+                word: wordData.word,
+                soundURL: wordData.audioURL != nil ? URL(string: wordData.audioURL!) : nil,
+                level: difficulty,
+                createdByID: "system",
+                gameID: gameID
+            )
+        }
+        
+        print("📝 Created \(words.count) Word objects")
+        print("   Words: \(words.map { $0.word })")
+        
+        games[gameIndex].words = words
+        games[gameIndex].hasGeneratedWords = true
+        games[gameIndex].isStarted = true
+        
+        await saveGame(games[gameIndex])
+        
+        print("💾 Game saved with \(games[gameIndex].words.count) words")
+        
+        return words
+    }
+    
+    func getCorrectWordCount(for gameID: UUID, userID: String? = nil) -> Int {
+        let targetUserID = userID ?? currentUser?.id
+        guard let targetUserID = targetUserID else { return 0 }
+        
+        if let progress = getUserProgress(for: gameID, userID: targetUserID) {
+            return progress.correctlySpelledWords.count
+        }
+        return 0
+    }
+    
+    func addWords(to gameID: UUID, words: [Word]) async -> Bool {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot add words: Not authenticated")
+            return false
+        }
+        
+        guard let index = games.firstIndex(where: { $0.id == gameID }) else {
+            return false
+        }
+        
+        games[index].words.append(contentsOf: words)
+        await saveGame(games[index])
+        return true
+    }
+    
+    func startGame(gameID: UUID) async -> Bool {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot start game: Not authenticated")
+            return false
+        }
+        
+        guard let index = games.firstIndex(where: { $0.id == gameID }) else {
+            return false
+        }
+        
+        games[index].isStarted = true
+        await saveGame(games[index])
+        return true
+    }
+    
+    private func loadUsers() async {
+        do {
+            let querySnapshot = try await db.collection("users").getDocuments()
+            self.users = querySnapshot.documents.compactMap { document in
+                try? document.data(as: SpellGameUser.self)
+            }
+        } catch {
+            print("Error loading users: \(error)")
+        }
+    }
+    
+    private func saveUser(_ user: SpellGameUser) async {
+        do {
+            try db.collection("users").document(user.id).setData(from: user)
+        } catch {
+            print("Error saving user: \(error)")
+        }
+    }
+    
+    func saveUsers() async {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot save users: Not authenticated")
+            return
+        }
+        
+        for user in users {
+            await saveUser(user)
+        }
+    }
+    
+    private func loadGames() async {
+        do {
+            let querySnapshot = try await db.collection("games").getDocuments()
+            self.games = querySnapshot.documents.compactMap { document in
+                let game = try? document.data(as: MultiUserGame.self)
+                if let game = game {
+                    print("📦 Loaded game \(game.id) with \(game.words.count) words")
+                }
+                return game
+            }
+            print("📦 Total games loaded: \(games.count)")
+        } catch {
+            print("Error loading games: \(error)")
+        }
+    }
+    
+    private func saveGame(_ game: MultiUserGame) async {
+        do {
+            try db.collection("games").document(game.id.uuidString).setData(from: game)
+            print("💾 Saved game \(game.id) to Firestore with \(game.words.count) words")
+        } catch {
+            print("❌ Error saving game: \(error)")
+        }
+    }
+    
+    func saveGames() async {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot save games: Not authenticated")
+            return
+        }
+        
+        for game in games {
+            await saveGame(game)
+        }
+    }
+    
+    // MARK: - User Game Progress Methods
+    
+    func getUserProgress(for gameID: UUID, userID: String? = nil) -> UserGameProgress? {
+        let targetUserID = userID ?? currentUser?.id
+        guard let targetUserID = targetUserID else { return nil }
+        
+        let progressID = UserGameProgress.generateID(userID: targetUserID, gameID: gameID)
+        return userGameProgresses.first { $0.id == progressID }
+    }
+    
+    func updateUserProgress(
+        gameID: UUID,
+        wordIndex: Int,
+        completedWordIndices: [Int],
+        correctlySpelledWords: [String],
+        score: Int,
+        userID: String? = nil
+    ) async -> Bool {
+        let targetUserID = userID ?? currentUser?.id
+        guard let targetUserID = targetUserID else { return false }
+        
+        let progressID = UserGameProgress.generateID(userID: targetUserID, gameID: gameID)
+        
+        if let existingIndex = userGameProgresses.firstIndex(where: { $0.id == progressID }) {
+            userGameProgresses[existingIndex].currentWordIndex = wordIndex
+            userGameProgresses[existingIndex].completedWordIndices = completedWordIndices
+            userGameProgresses[existingIndex].correctlySpelledWords = correctlySpelledWords
+            userGameProgresses[existingIndex].score = score
+            userGameProgresses[existingIndex].lastUpdated = Date()
+            await saveUserGameProgress(userGameProgresses[existingIndex])
+            return true
+        } else {
+            let newProgress = UserGameProgress(
+                userID: targetUserID,
+                gameID: gameID,
+                completedWordIndices: completedWordIndices,
+                correctlySpelledWords: correctlySpelledWords,
+                currentWordIndex: wordIndex,
+                score: score,
+                lastUpdated: Date()
+            )
+            userGameProgresses.append(newProgress)
+            await saveUserGameProgress(newProgress)
+            return true
+        }
+    }
+    
+    private func loadUserGameProgresses() async {
+        do {
+            let querySnapshot = try await db.collection("userGameProgresses").getDocuments()
+            self.userGameProgresses = querySnapshot.documents.compactMap { document in
+                try? document.data(as: UserGameProgress.self)
+            }
+        } catch {
+            print("Error loading user game progresses: \(error)")
+        }
+    }
+    
+    private func saveUserGameProgress(_ progress: UserGameProgress) async {
+        do {
+            try db.collection("userGameProgresses").document(progress.id).setData(from: progress)
+        } catch {
+            print("Error saving user game progress: \(error)")
+        }
+    }
+    
+    // MARK: - Utility Methods
+    
+    func getUser(by id: String) -> SpellGameUser? {
+        return users.first { $0.id == id }
+    }
+    
+    func getParticipantNames(for game: MultiUserGame) -> [String] {
+        return game.participantsIDs.compactMap { getUser(by: $0)?.displayName }
+    }
+    
+    func getCreatorName(for game: MultiUserGame) -> String? {
+        return getUser(by: game.creatorID)?.displayName
+    }
+    
+    // MARK: - Reactive Data Loading
+    
+    func setupRealtimeListeners() {
+        guard userManager?.isAuthenticated == true else {
+            print("Cannot setup listeners: Not authenticated")
+            return
+        }
+        
+        print("🔔 Setting up real-time listeners...")
+        
+        usersListener = db.collection("users").addSnapshotListener { [weak self] querySnapshot, error in
+            guard let documents = querySnapshot?.documents else {
+                print("Error fetching users: \(error?.localizedDescription ?? "Unknown error")")
+                return
+            }
+            
+            Task { @MainActor [weak self] in
+                self?.users = documents.compactMap { document in
+                    try? document.data(as: SpellGameUser.self)
+                }
+            }
+        }
+        
+        gamesListener = db.collection("games").addSnapshotListener { [weak self] querySnapshot, error in
+            guard let documents = querySnapshot?.documents else {
+                print("Error fetching games: \(error?.localizedDescription ?? "Unknown error")")
+                return
+            }
+            
+            Task { @MainActor [weak self] in
+                let newGames = documents.compactMap { document -> MultiUserGame? in
+                    do {
+                        let game = try document.data(as: MultiUserGame.self)
+                        print("🔔 Real-time update: Game \(game.id)")
+                        print("   - has \(game.words.count) words")
+                        print("   - hasGeneratedWords: \(game.hasGeneratedWords)")  // Add this debug line
+                        print("   - isStarted: \(game.isStarted)")
+                        return game
+                    } catch {
+                        print("❌ Error decoding game: \(error)")
+                        // Print the raw document data to see what's in Firestore
+                        print("   Raw data: \(document.data())")
+                        return nil
+                    }
+                }
+                self?.games = newGames
+                print("🔔 Games updated via listener: \(newGames.count) total")
+            }
+        }
+        
+        progressListener = db.collection("userGameProgresses").addSnapshotListener { [weak self] querySnapshot, error in
+            guard let documents = querySnapshot?.documents else {
+                print("Error fetching user game progresses: \(error?.localizedDescription ?? "Unknown error")")
+                return
+            }
+            
+            Task { @MainActor [weak self] in
+                self?.userGameProgresses = documents.compactMap { document in
+                    try? document.data(as: UserGameProgress.self)
+                }
+                print("🔔 Progress updated via listener: \(self?.userGameProgresses.count ?? 0) records")
+            }
+        }
+    }
+    
+    func setGameDifficulty(gameID: UUID, level: Int) async -> Bool {
+        guard userManager?.isAuthenticated == true else {
+            return false
+        }
+        
+        guard let index = games.firstIndex(where: { $0.id == gameID }) else {
+            return false
+        }
+        
+        games[index].difficultyLevel = max(1, min(5, level))
+        await saveGame(games[index])
+        return true
+    }
+}
+```
+
+---
+
+## File: Model/DictionaryResponse.swift
+
+```swift
+import Foundation
+
+struct DictionaryResponse: Codable, Sendable {
+    let word: String
+    let phonetic: String?
+    let phonetics: [Phonetic]
+    let meanings: [Meaning]
+    let license: License?
+    let sourceUrls: [String]?
+}
+
+struct Phonetic: Codable, Sendable {
+    let text: String?
+    let audio: String?
+    let sourceUrl: String?
+    let license: License?
+}
+
+struct Meaning: Codable, Sendable {
+    let partOfSpeech: String
+    let definitions: [Definition]
+    let synonyms: [String]?
+    let antonyms: [String]?
+}
+
+struct Definition: Codable, Sendable {
+    let definition: String
+    let synonyms: [String]?
+    let antonyms: [String]?
+    let example: String?
+}
+
+struct License: Codable, Sendable {
+    let name: String
+    let url: String
+}
+```
+
+---
+
+## File: Model/MultiUserGame.swift
+
+```swift
+import SwiftUI
+
+struct MultiUserGame: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var creatorID: String
+    var participantsIDs: Set<String>
+    var words: [Word]
+    var isStarted: Bool = false
+    var hasGeneratedWords: Bool = false
+    var difficultyLevel: Int = 2
+    var wordCount: Int = 10
+    let creationDate: Date
+    
+    static func == (lhs: MultiUserGame, rhs: MultiUserGame) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    var difficultyText: String {
+        switch difficultyLevel {
+        case 1: return "Easy"
+        case 2: return "Medium"
+        case 3: return "Hard"
+        default: return "Medium"
+        }
+    }
+}
+```
+
+---
+
+## File: Model/RandomWordResponse.swift
+
+```swift
+import Foundation
+
+typealias RandomWordResponse = [String]
+```
+
+---
+
+## File: Model/SpellGameUser.swift
+
+```swift
+
+import Foundation
+
+struct SpellGameUser: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    let username: String
+    let email: String
+    
+    static func == (lhs: SpellGameUser, rhs: SpellGameUser) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+```
+
+---
+
+## File: Model/SpellGameUser+DisplayName.swift
+
+```swift
+import Foundation
+
+extension SpellGameUser {
+    var displayName: String {
+        if !username.isEmpty {
+            return username
+        }
+        return email.components(separatedBy: "@")[0]
+    }
+    
+    var fullDisplayName: String {
+        if !username.isEmpty {
+            return username
+        }
+        return email
+    }
+    
+    var initialLetter: String {
+        if !username.isEmpty {
+            return String(username.prefix(1)).uppercased()
+        }
+        return String(email.prefix(1)).uppercased()
+    }
+}
+```
+
+---
+
+## File: Model/UserGameProgress.swift
+
+```swift
+import Foundation
+
+struct UserGameProgress: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    let userID: String
+    let gameID: UUID
+    var completedWordIndices: [Int]
+    var correctlySpelledWords: [String]
+    var currentWordIndex: Int
+    var score: Int
+    var lastUpdated: Date
+    
+    init(userID: String, gameID: UUID, completedWordIndices: [Int] = [], correctlySpelledWords: [String] = [], currentWordIndex: Int = 0, score: Int = 0, lastUpdated: Date = Date()) {
+        self.userID = userID
+        self.gameID = gameID
+        self.completedWordIndices = completedWordIndices
+        self.correctlySpelledWords = correctlySpelledWords
+        self.currentWordIndex = currentWordIndex
+        self.score = score
+        self.lastUpdated = lastUpdated
+        self.id = Self.generateID(userID: userID, gameID: gameID)
+    }
+    
+    static func generateID(userID: String, gameID: UUID) -> String {
+        return "\(userID)-\(gameID.uuidString)"
+    }
+    
+    static func == (lhs: UserGameProgress, rhs: UserGameProgress) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+```
+
+---
+
+## File: Model/Word.swift
+
+```swift
+import Foundation
+
+struct Word: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    let word: String
+    let soundURL: URL?
+    let level: Int
+    var createdByID: String
+    var gameID: UUID?
+    
+    init(id: UUID = UUID(), word: String, soundURL: URL?, level: Int, createdByID: String, gameID: UUID? = nil) {
+        self.id = id
+        self.word = word
+        self.soundURL = soundURL
+        self.level = level
+        self.createdByID = createdByID
+        self.gameID = gameID
+    }
+    
+    static func == (lhs: Word, rhs: Word) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+```
+
+---
+
+## File: Service/WordApiService.swift
+
+```swift
+import Foundation
+
+enum WordAPIError: Error, Sendable {
+    case invalidURL
+    case noData
+    case decodingError
+    case noAudioAvailable
+    case networkError(String)
+    case insufficientWords
+    
+    var localizedDescription: String {
+        switch self {
+        case .invalidURL:
+            return "Invalid URL"
+        case .noData:
+            return "No data received"
+        case .decodingError:
+            return "Failed to decode response"
+        case .noAudioAvailable:
+            return "No audio available for this word"
+        case .networkError(let message):
+            return "Network error: \(message)"
+        case .insufficientWords:
+            return "Could not fetch enough words with audio"
+        }
+    }
+}
+
+struct WordWithDetails: Sendable {
+    let word: String
+    let audioURL: String?
+    let definition: String?
+}
+
+actor WordAPIService {
+    static let shared = WordAPIService()
+    
+    private init() {}
+    
+    /// Fetches random words from the API
+    func fetchRandomWords(count: Int = 10, length: Int = 5) async throws -> [String] {
+        let urlString = "https://random-word-api.vercel.app/api?words=\(count)&length=\(length)"
+        
+        guard let url = URL(string: urlString) else {
+            throw WordAPIError.invalidURL
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        do {
+            let words = try JSONDecoder().decode([String].self, from: data)
+            return words
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
+    }
+    
+    /// Fetches word details from Dictionary API
+    func fetchWordDetails(word: String) async throws -> DictionaryResponse {
+        let urlString = "https://api.dictionaryapi.dev/api/v2/entries/en/\(word)"
+        
+        guard let url = URL(string: urlString) else {
+            throw WordAPIError.invalidURL
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        do {
+            let responses = try JSONDecoder().decode([DictionaryResponse].self, from: data)
+            if let firstResponse = responses.first {
+                return firstResponse
+            } else {
+                throw WordAPIError.noData
+            }
+        } catch let error as WordAPIError {
+            throw error
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
+    }
+    
+    /// Fetches random words with their details and audio URLs
+    func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5) async throws -> [WordWithDetails] {
+        let requestCount = count * 3
+        
+        print("🌐 Requesting \(requestCount) words from API to get \(count) with audio...")
+        
+        let words = try await fetchRandomWords(count: requestCount, length: length)
+        print("📥 Received \(words.count) words from random word API")
+        
+        var wordsWithDetails: [WordWithDetails] = []
+        
+        await withTaskGroup(of: WordWithDetails?.self) { group in
+            for word in words {
+                group.addTask {
+                    do {
+                        let details = try await self.fetchWordDetails(word: word)
+                        let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
+                        let definition = details.meanings.first?.definitions.first?.definition
+                        
+                        if audioURL != nil {
+                            return WordWithDetails(word: word, audioURL: audioURL, definition: definition)
+                        }
+                        return nil
+                    } catch {
+                        print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+                        return nil
+                    }
+                }
+            }
+            
+            for await result in group {
+                if let wordWithDetails = result {
+                    wordsWithDetails.append(wordWithDetails)
+                    if wordsWithDetails.count >= count {
+                        group.cancelAll()
+                        break
+                    }
+                }
+            }
+        }
+        
+        print("✅ Found \(wordsWithDetails.count) words with audio (needed \(count))")
+        
+        let finalWords = Array(wordsWithDetails.prefix(count))
+        
+        if finalWords.isEmpty {
+            throw WordAPIError.noAudioAvailable
+        }
+        
+        print("🎉 Successfully returning \(finalWords.count) words:")
+        finalWords.forEach { print("   - \($0.word)") }
+        
+        return finalWords
+    }
+}
+```
+
+---
+
+## File: SpellingBeeApp.swift
+
+```swift
+import SwiftUI
+import FirebaseCore
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        return true
+    }
+    
+    func applicationDidBecomeActive(_ application: UIApplication) {
+    }
+    
+    func applicationWillResignActive(_ application: UIApplication) {
+    }
+}
+
+@main
+struct SpellingBeeApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+```
+
+---
+
+## File: UserManager.swift
+
+```swift
+import Foundation
+import SwiftUI
+import Firebase
+import FirebaseAuth
+import FirebaseFirestore
+
+@MainActor
+final class UserManager: ObservableObject {
+    @Published var currentUser: SpellGameUser?
+    @Published var isAuthenticated = false
+    
+    private let db = Firestore.firestore()
+    nonisolated(unsafe)private var authStateListener: AuthStateDidChangeListenerHandle?
+    
+    init() {
+        setupAuthStateListener()
+    }
+    
+    
+    deinit {
+        if let listener = authStateListener {
+            Auth.auth().removeStateDidChangeListener(listener)
+        }
+    }
+    
+    private func setupAuthStateListener() {
+        authStateListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                
+                if let user = user {
+                    do {
+                        let spellGameUser = try await self.fetchUserFromFirestore(uid: user.uid)
+                        self.currentUser = spellGameUser
+                        self.isAuthenticated = true
+                    } catch {
+                        print("Error fetching user from Firestore: \(error)")
+                        let fallbackUser = SpellGameUser(
+                            id: user.uid,
+                            username: user.displayName ?? "User",
+                            email: user.email ?? ""
+                        )
+                        self.currentUser = fallbackUser
+                        self.isAuthenticated = true
+                        await self.saveUserToFirestore(user: fallbackUser)
+                    }
+                } else {
+                    self.currentUser = nil
+                    self.isAuthenticated = false
+                }
+            }
+        }
+    }
+    
+    private func fetchUserFromFirestore(uid: String) async throws -> SpellGameUser {
+        let document = try await db.collection("users").document(uid).getDocument()
+        
+        guard document.exists else {
+            throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found in Firestore"])
+        }
+        
+        return try document.data(as: SpellGameUser.self)
+    }
+    
+    private func saveUserToFirestore(user: SpellGameUser) async {
+        do {
+            try db.collection("users").document(user.id).setData(from: user)
+        } catch {
+            print("Error saving user to Firestore: \(error)")
+        }
+    }
+    
+    func register(username: String, email: String, password: String) async throws -> SpellGameUser {
+        let authResult = try await Auth.auth().createUser(withEmail: email, password: password)
+        let user = authResult.user
+        
+        let newUser = SpellGameUser(
+            id: user.uid,
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+            email: email
+        )
+        
+        await saveUserToFirestore(user: newUser)
+        
+        let changeRequest = user.createProfileChangeRequest()
+        changeRequest.displayName = username
+        try? await changeRequest.commitChanges()
+        
+        return newUser
+    }
+    
+    func login(email: String, password: String) async throws -> SpellGameUser {
+        let authResult = try await Auth.auth().signIn(withEmail: email, password: password)
+        let user = authResult.user
+        
+        do {
+            return try await fetchUserFromFirestore(uid: user.uid)
+        } catch {
+            let fallbackUser = SpellGameUser(
+                id: user.uid,
+                username: user.displayName ?? "User",
+                email: email
+            )
+            await saveUserToFirestore(user: fallbackUser)
+            return fallbackUser
+        }
+    }
+    
+    func signOut() {
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            print("Error signing out: \(error)")
+        }
+    }
+    
+    func updateUserProfile(username: String) async throws -> SpellGameUser {
+        guard let currentUser = currentUser else {
+            throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "No authenticated user"])
+        }
+        
+        let updatedUser = SpellGameUser(id: currentUser.id, username: username, email: currentUser.email)
+        
+        await saveUserToFirestore(user: updatedUser)
+        
+        if let user = Auth.auth().currentUser {
+            let changeRequest = user.createProfileChangeRequest()
+            changeRequest.displayName = username
+            try await changeRequest.commitChanges()
+        }
+        
+        self.currentUser = updatedUser
+        return updatedUser
+    }
+}
+```
+
+---
+
+## File: Views/CommViews.swift
+
+```swift
+import SwiftUI
+
+struct ModernTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            .foregroundColor(.primary)
+    }
+}
+```
+
+---
+
+## File: Views/CreateGameView.swift
+
+```swift
+import SwiftUI
+
+struct CreateGameView: View {
+    @EnvironmentObject var gameManager: GameManager
+    @Binding var showCreateGameView: Bool
+    @State private var selectedUsers = Set<SpellGameUser>()
+    @State private var selectedDifficulty = 2
+    @State private var numberOfWords = 10
+    @State private var isCreatingGame = false
+    @State private var errorMessage: String?
+    
+    let wordCountOptions = [5, 10, 15, 20]
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                HStack {
+                    Text("Create New Game")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button("Cancel") {
+                        showCreateGameView = false
+                    }
+                    .foregroundColor(.red)
+                }
+                .padding(.horizontal)
+                
+                ScrollView {
+                    VStack(spacing: 20) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Select Players", systemImage: "person.2.fill")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            if gameManager.users.filter({ $0.id != gameManager.currentUser?.id }).isEmpty {
+                                Text("No other users available")
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding()
+                            } else {
+                                List(gameManager.users.filter { $0.id != gameManager.currentUser?.id }, id: \.self, selection: $selectedUsers) { user in
+                                    HStack {
+                                        Circle()
+                                            .fill(Color.blue.opacity(0.2))
+                                            .frame(width: 35, height: 35)
+                                            .overlay(
+                                                Text(user.initialLetter)
+                                                    .font(.caption)
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(.blue)
+                                            )
+                                        Text(user.displayName)
+                                            .foregroundColor(.primary)
+                                    }
+                                }
+                                .environment(\.editMode, .constant(.active))
+                                .frame(minHeight: 200, maxHeight: 300)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                            }
+                            
+                            Text("\(selectedUsers.count) player(s) selected")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6).opacity(0.5))
+                        .cornerRadius(12)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Difficulty Level", systemImage: "slider.horizontal.3")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            Picker("Difficulty", selection: $selectedDifficulty) {
+                                Text("Easy").tag(1)
+                                Text("Medium").tag(2)
+                                Text("Hard").tag(3)
+                            }
+                            .pickerStyle(SegmentedPickerStyle())
+                            
+                            Text(difficultyDescription)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6).opacity(0.5))
+                        .cornerRadius(12)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Number of Words", systemImage: "text.book.closed")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            HStack(spacing: 15) {
+                                ForEach(wordCountOptions, id: \.self) { count in
+                                    Button(action: {
+                                        numberOfWords = count
+                                    }) {
+                                        Text("\(count)")
+                                            .font(.headline)
+                                            .foregroundColor(numberOfWords == count ? .white : .primary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                numberOfWords == count ? Color.blue : Color(.systemGray5)
+                                            )
+                                            .cornerRadius(8)
+                                    }
+                                }
+                            }
+                            
+                            Text("Select how many words players will spell")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6).opacity(0.5))
+                        .cornerRadius(12)
+                        
+                        if let errorMessage = errorMessage {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(errorMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                
+                Button(action: {
+                    Task {
+                        await createGame()
+                    }
+                }) {
+                    HStack {
+                        if isCreatingGame {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Create Game")
+                        }
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue, Color.purple]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+                    .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 3)
+                }
+                .disabled(isCreatingGame || selectedUsers.isEmpty)
+                .opacity((isCreatingGame || selectedUsers.isEmpty) ? 0.6 : 1.0)
+                .padding(.horizontal)
+            }
+            .padding(.vertical)
+            .background(Color(.systemBackground))
+            .navigationBarHidden(true)
+        }
+    }
+    
+    private var difficultyDescription: String {
+        switch selectedDifficulty {
+        case 1:
+            return "Simple, common words (3-4 letters)"
+        case 2:
+            return "Moderate difficulty words (4-5 letters)"
+        case 3:
+            return "Challenging words (5-6 letters)"
+        default:
+            return ""
+        }
+    }
+    
+    private func createGame() async {
+        guard let currentUser = gameManager.currentUser else { return }
+        
+        isCreatingGame = true
+        errorMessage = nil
+        
+        var participantsIDs = selectedUsers.map { $0.id }
+        participantsIDs.append(currentUser.id)
+        
+        guard let gameID = await gameManager.createGame(
+            creatorID: currentUser.id,
+            participantsIDs: Set(participantsIDs),
+            difficulty: selectedDifficulty,
+            wordCount: numberOfWords
+        ) else {
+            isCreatingGame = false
+            errorMessage = "Failed to create game"
+            return
+        }
+        
+        do {
+            _ = try await gameManager.generateWordsForGame(
+                gameID: gameID,
+                wordCount: numberOfWords,
+                difficulty: selectedDifficulty
+            )
+            _ = await gameManager.startGame(gameID: gameID)
+            showCreateGameView = false
+        } catch {
+            errorMessage = "Failed to generate words: \(error.localizedDescription)"
+        }
+        
+        isCreatingGame = false
+    }
+}
+```
+
+---
+
+## File: Views/GamePlayView.swift
+
+```swift
+import SwiftUI
+import AVFoundation
+
+// MARK: - Star Particle for Animation
+struct StarParticle: Identifiable {
+    let id = UUID()
+    var x: CGFloat
+    var y: CGFloat
+    var scale: CGFloat
+    var opacity: Double
+    var rotation: Double
+    var color: Color
+}
+
+// MARK: - Exploding Stars View
+struct ExplodingStarsView: View {
+    @Binding var isAnimating: Bool
+    @State private var particles: [StarParticle] = []
+    
+    let colors: [Color] = [.yellow, .orange, .pink, .purple, .blue, .green]
+    
+    var body: some View {
+        ZStack {
+            ForEach(particles) { particle in
+                Image(systemName: "star.fill")
+                    .foregroundColor(particle.color)
+                    .scaleEffect(particle.scale)
+                    .opacity(particle.opacity)
+                    .rotationEffect(.degrees(particle.rotation))
+                    .position(x: particle.x, y: particle.y)
+            }
+        }
+        .onChange(of: isAnimating) { _, newValue in
+            if newValue {
+                createExplosion()
+            }
+        }
+    }
+    
+    private func createExplosion() {
+        particles = []
+        
+        for _ in 0..<25 {
+            let particle = StarParticle(
+                x: UIScreen.main.bounds.width / 2,
+                y: UIScreen.main.bounds.height / 2 - 50,
+                scale: CGFloat.random(in: 0.3...1.2),
+                opacity: 1.0,
+                rotation: Double.random(in: 0...360),
+                color: colors.randomElement() ?? .yellow
+            )
+            particles.append(particle)
+        }
+        
+        withAnimation(.easeOut(duration: 1.0)) {
+            for i in particles.indices {
+                let angle = Double.random(in: 0...(2 * .pi))
+                let distance = CGFloat.random(in: 120...280)
+                particles[i].x += cos(angle) * distance
+                particles[i].y += sin(angle) * distance
+                particles[i].scale *= CGFloat.random(in: 0.5...1.8)
+                particles[i].rotation += Double.random(in: 180...720)
+            }
+        }
+        
+        withAnimation(.easeOut(duration: 1.0).delay(0.3)) {
+            for i in particles.indices {
+                particles[i].opacity = 0
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+            isAnimating = false
+            particles = []
+        }
+    }
+}
+
+// MARK: - Correct Spelling Overlay
+struct CorrectSpellingOverlay: View {
+    let correctWord: String
+    let userAnswer: String
+    let onDismiss: () -> Void
+    
+    @State private var showContent = false
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.red)
+            
+            Text("Incorrect")
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+            
+            VStack(spacing: 8) {
+                Text("Correct spelling:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Text(correctWord)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.green.opacity(0.15))
+                    .cornerRadius(12)
+                
+                if !userAnswer.isEmpty {
+                    Text("You typed: \(userAnswer)")
+                        .font(.caption)
+                        .foregroundColor(.red.opacity(0.7))
+                        .padding(.top, 4)
+                }
+            }
+        }
+        .padding(30)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+        )
+        .scaleEffect(showContent ? 1.0 : 0.5)
+        .opacity(showContent ? 1.0 : 0.0)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                showContent = true
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    showContent = false
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    onDismiss()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Correct Answer Celebration
+struct CorrectAnswerOverlay: View {
+    let points: Int
+    let onDismiss: () -> Void
+    
+    @State private var showContent = false
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.green)
+            
+            Text("Correct!")
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+            
+            Text("+\(points) points")
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundColor(.blue)
+        }
+        .padding(30)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+        )
+        .scaleEffect(showContent ? 1.0 : 0.5)
+        .opacity(showContent ? 1.0 : 0.0)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                showContent = true
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    showContent = false
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    onDismiss()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Main Game Play View
+struct GamePlayView: View {
+    @EnvironmentObject var gameManager: GameManager
+    let game: MultiUserGame
+    @State private var currentWordIndex = 0
+    @State private var userInput = ""
+    @State private var isPlaying = false
+    @State private var timerTask: Task<Void, Never>?
+    @State private var timeElapsed: Double = 0
+    @State private var score = 0
+    @State private var showCorrectAnswer = false
+    @State private var showWrongAnswer = false
+    @State private var isCorrect = false
+    @State private var completedWordIndices: [Int] = []
+    @State private var correctlySpelledWords: [String] = []
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var showStarExplosion = false
+    @State private var lastCorrectWord: String = ""
+    @State private var lastUserAnswer: String = ""
+    @State private var lastPoints: Int = 0
+    @State private var isProcessingAnswer = false
+    @Environment(\.presentationMode) var presentationMode
+    
+    private var currentWord: Word? {
+        guard currentWordIndex < game.words.count else { return nil }
+        return game.words.indices.contains(currentWordIndex) ? game.words[currentWordIndex] : nil
+    }
+    
+    private var isGameComplete: Bool {
+        return completedWordIndices.count >= game.wordCount
+    }
+    
+    var body: some View {
+        ZStack {
+            Color(.systemBackground)
+                .edgesIgnoringSafeArea(.all)
+            
+            VStack(spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Spell the Words")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.primary)
+                        Text("\(game.difficultyText) - \(game.wordCount) words")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Score: \(score)")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                        Text("\(correctlySpelledWords.count) correct")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal)
+                
+                VStack(spacing: 8) {
+                    ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
+                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        .scaleEffect(y: 1.5)
+                        .animation(.easeInOut, value: completedWordIndices.count)
+                    
+                    HStack {
+                        Text("Word \(min(completedWordIndices.count + 1, game.wordCount)) of \(game.wordCount)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(correctlySpelledWords.count)/\(game.wordCount) correct")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal)
+                
+                VStack(spacing: 20) {
+                    if !isGameComplete, let word = currentWord {
+                        Button(action: {
+                            Task {
+                                await playWord()
+                            }
+                        }) {
+                            VStack(spacing: 12) {
+                                Image(systemName: isPlaying ? "speaker.wave.3.fill" : "play.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.white)
+                                    .symbolEffect(.bounce, value: isPlaying)
+                                
+                                Text(isPlaying ? "Playing..." : "Tap to hear word")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                            .frame(width: 130, height: 130)
+                            .background(
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                isPlaying ? Color.orange : Color.blue,
+                                                isPlaying ? Color.red : Color.purple
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                            )
+                            .scaleEffect(isPlaying ? 1.05 : 1.0)
+                            .animation(.easeInOut(duration: 0.3), value: isPlaying)
+                        }
+                        .disabled(isPlaying || isProcessingAnswer)
+                        
+                        VStack(spacing: 8) {
+                            TextField("Type the word you hear", text: $userInput)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .font(.title2)
+                                .multilineTextAlignment(.center)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    Task {
+                                        await checkSpelling()
+                                    }
+                                }
+                                .disabled(isProcessingAnswer)
+                            
+                            if timeElapsed > 0 {
+                                Text("Time: \(String(format: "%.1f", timeElapsed))s")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        
+                    } else if isGameComplete {
+                        VStack(spacing: 20) {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.yellow)
+                            
+                            Text("Game Complete!")
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            
+                            VStack(spacing: 8) {
+                                Text("Final Score: \(score)")
+                                    .font(.title2)
+                                    .foregroundColor(.blue)
+                                
+                                Text("Correctly Spelled: \(correctlySpelledWords.count)/\(game.wordCount)")
+                                    .font(.headline)
+                                    .foregroundColor(.green)
+                                
+                                let bestPossible = game.wordCount * 90
+                                let percentage = bestPossible > 0 ? (Double(score) / Double(bestPossible)) * 100 : 0
+                                Text("Score Efficiency: \(String(format: "%.1f", percentage))%")
+                                    .font(.subheadline)
+                                    .foregroundColor(.purple)
+                            }
+                            
+                            Button(action: {
+                                presentationMode.wrappedValue.dismiss()
+                            }) {
+                                HStack {
+                                    Image(systemName: "house.fill")
+                                    Text("Back to Games")
+                                }
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue)
+                                .cornerRadius(12)
+                            }
+                            .padding(.top, 10)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(15)
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(15)
+                .shadow(radius: 5)
+                
+                Spacer()
+                
+                if !isGameComplete && currentWord != nil {
+                    Button(action: {
+                        Task {
+                            await checkSpelling()
+                        }
+                    }) {
+                        Text("Submit Answer")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.green, Color.blue]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(12)
+                    }
+                    .disabled(userInput.isEmpty || isProcessingAnswer)
+                    .opacity((userInput.isEmpty || isProcessingAnswer) ? 0.6 : 1.0)
+                }
+            }
+            .padding()
+            
+            if showWrongAnswer {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture { }
+                
+                CorrectSpellingOverlay(
+                    correctWord: lastCorrectWord,
+                    userAnswer: lastUserAnswer,
+                    onDismiss: {
+                        moveToNextWord()
+                    }
+                )
+                .zIndex(1)
+            }
+            
+            if showCorrectAnswer {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture { }
+                
+                CorrectAnswerOverlay(
+                    points: lastPoints,
+                    onDismiss: {
+                        moveToNextWord()
+                    }
+                )
+                .zIndex(1)
+            }
+            
+            ExplodingStarsView(isAnimating: $showStarExplosion)
+                .allowsHitTesting(false)
+                .zIndex(2)
+        }
+        .navigationBarBackButtonHidden(false)
+        .onAppear {
+            configureAudioSession()
+            loadUserProgress()
+        }
+        .onDisappear {
+            timerTask?.cancel()
+            Task {
+                await saveUserProgress()
+            }
+        }
+    }
+    
+    private func configureAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to configure audio session: \(error)")
+        }
+    }
+    
+    private func loadUserProgress() {
+        if let progress = gameManager.getUserProgress(for: game.id) {
+            self.completedWordIndices = progress.completedWordIndices
+            self.correctlySpelledWords = progress.correctlySpelledWords
+            self.score = progress.score
+            self.currentWordIndex = progress.currentWordIndex
+            
+            if completedWordIndices.contains(currentWordIndex) && !isGameComplete {
+                findNextUncompletedWord()
+            }
+        } else {
+            self.currentWordIndex = 0
+            self.completedWordIndices = []
+            self.correctlySpelledWords = []
+            self.score = 0
+        }
+    }
+    
+    private func saveUserProgress() async {
+        _ = await gameManager.updateUserProgress(
+            gameID: game.id,
+            wordIndex: currentWordIndex,
+            completedWordIndices: completedWordIndices,
+            correctlySpelledWords: correctlySpelledWords,
+            score: score
+        )
+    }
+    
+    private func findNextUncompletedWord() {
+        for index in 0..<game.wordCount {
+            if !completedWordIndices.contains(index) {
+                currentWordIndex = index
+                return
+            }
+        }
+    }
+    
+    private func playWord() async {
+        guard let word = currentWord, let soundURLString = word.soundURL?.absoluteString else { return }
+        
+        isPlaying = true
+        
+        guard let url = URL(string: soundURLString) else {
+            isPlaying = false
+            return
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer?.volume = 1.0
+            audioPlayer?.prepareToPlay()
+            audioPlayer?.play()
+            
+            if timeElapsed == 0 {
+                startTimer()
+            }
+            
+            if let duration = audioPlayer?.duration {
+                try await Task.sleep(for: .seconds(duration))
+            }
+            isPlaying = false
+        } catch {
+            print("Error playing audio: \(error)")
+            isPlaying = false
+        }
+    }
+    
+    private func startTimer() {
+        timeElapsed = 0
+        timerTask?.cancel()
+        timerTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                await MainActor.run {
+                    timeElapsed += 0.1
+                    if timeElapsed >= 30 {
+                        Task {
+                            await checkSpelling()
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func checkSpelling() async {
+        guard let word = currentWord, !isProcessingAnswer else { return }
+        
+        isProcessingAnswer = true
+        timerTask?.cancel()
+        
+        let userAnswer = userInput.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        isCorrect = userAnswer == word.word.lowercased()
+        
+        lastCorrectWord = word.word
+        lastUserAnswer = userInput
+        
+        if isCorrect {
+            if !correctlySpelledWords.contains(word.word) {
+                correctlySpelledWords.append(word.word)
+            }
+            lastPoints = calculatePoints()
+            score += lastPoints
+            showStarExplosion = true
+            showCorrectAnswer = true
+        } else {
+            showWrongAnswer = true
+        }
+        
+        if !completedWordIndices.contains(currentWordIndex) {
+            completedWordIndices.append(currentWordIndex)
+        }
+        
+        await saveUserProgress()
+    }
+    
+    private func moveToNextWord() {
+        showCorrectAnswer = false
+        showWrongAnswer = false
+        userInput = ""
+        timeElapsed = 0
+        audioPlayer = nil
+        isProcessingAnswer = false
+        
+        if completedWordIndices.count >= game.wordCount {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                presentationMode.wrappedValue.dismiss()
+            }
+        } else {
+            findNextUncompletedWord()
+        }
+    }
+    
+    private func calculatePoints() -> Int {
+        let basePoints = 100
+        let timePenalty = Int(timeElapsed * 2)
+        return max(0, basePoints - timePenalty)
+    }
+}
+```
+
+---
+
+## File: Views/LoginRegisterView.swift
+
+```swift
+import SwiftUI
+
+struct LoginRegisterView: View {
+    @EnvironmentObject var userManager: UserManager
+    @EnvironmentObject var gameManager: GameManager
+    @State private var isRegistering = false
+    @State private var username = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    
+    var body: some View {
+        VStack(spacing: 30) {
+            Image("SpellingBee")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 200, height: 200)
+                .padding(.top, 20)
+            
+            Text(isRegistering ? "Create Account" : "Welcome Back")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(.primary)
+                .animation(.easeInOut, value: isRegistering)
+            
+            VStack(spacing: 20) {
+                if isRegistering {
+                    TextField("Username", text: $username)
+                        .textFieldStyle(ModernTextFieldStyle())
+                        .textContentType(.username)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                }
+                
+                TextField("Email", text: $email)
+                    .textFieldStyle(ModernTextFieldStyle())
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .autocapitalization(.none)
+                
+                SecureField("Password", text: $password)
+                    .textFieldStyle(ModernTextFieldStyle())
+                    .textContentType(isRegistering ? .newPassword : .password)
+                
+                if let errorMessage = errorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut, value: isRegistering)
+            
+            Button(action: {
+                Task {
+                    await handleAuth()
+                }
+            }) {
+                HStack {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                    } else {
+                        Text(isRegistering ? "Sign Up" : "Log In")
+                            .font(.headline)
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(12)
+                .shadow(color: .blue.opacity(0.3), radius: 5, x: 0, y: 5)
+            }
+            .disabled(isLoading || !isFormValid)
+            .opacity(isLoading || !isFormValid ? 0.6 : 1.0)
+            .animation(.easeInOut, value: isLoading)
+            
+            VStack(spacing: 15) {
+                Text("Or continue with")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                SocialLoginButton(icon: "facebook", text: "Continue with Facebook", color: Color.blue)
+                SocialLoginButton(icon: "google", text: "Continue with Google", color: Color.red)
+            }
+            .opacity(0.8)
+            
+            Button(action: toggleAuthMode) {
+                Text(isRegistering ? "Already have an account? Log In" : "Need an account? Sign Up")
+                    .foregroundColor(.blue)
+                    .font(.subheadline)
+                    .underline()
+            }
+            .disabled(isLoading)
+            
+            Spacer()
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .onAppear {
+            errorMessage = nil
+        }
+    }
+    
+    private var isFormValid: Bool {
+        if isRegistering {
+            return !username.isEmpty && !email.isEmpty && !password.isEmpty && password.count >= 6
+        } else {
+            return !email.isEmpty && !password.isEmpty
+        }
+    }
+    
+    private func toggleAuthMode() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isRegistering.toggle()
+            errorMessage = nil
+            if !isRegistering {
+                password = ""
+            }
+        }
+    }
+    
+    private func handleAuth() async {
+        errorMessage = nil
+        
+        if email.isEmpty || password.isEmpty {
+            errorMessage = "Please fill in all required fields."
+            return
+        }
+        
+        if isRegistering && username.isEmpty {
+            errorMessage = "Username is required for registration."
+            return
+        }
+        
+        if password.count < 6 {
+            errorMessage = "Password must be at least 6 characters."
+            return
+        }
+        
+        if !isValidEmail(email) {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+        
+        isLoading = true
+        
+        do {
+            if isRegistering {
+                _ = try await userManager.register(username: username, email: email, password: password)
+            } else {
+                _ = try await userManager.login(email: email, password: password)
+            }
+            
+            username = ""
+            email = ""
+            password = ""
+            errorMessage = nil
+        } catch {
+            handleAuthError(error)
+        }
+        
+        isLoading = false
+    }
+    
+    private func handleAuthError(_ error: Error) {
+        if let authError = error as NSError? {
+            switch authError.code {
+            case 17007:
+                errorMessage = "An account with this email already exists."
+            case 17008:
+                errorMessage = "Please enter a valid email address."
+            case 17026:
+                errorMessage = "Password is too weak. Please choose a stronger password."
+            case 17011:
+                errorMessage = "No account found with this email."
+            case 17009:
+                errorMessage = "Incorrect password. Please try again."
+            case 17020:
+                errorMessage = "Network error. Please check your connection."
+            default:
+                errorMessage = error.localizedDescription
+            }
+        } else {
+            errorMessage = error.localizedDescription
+        }
+    }
+    
+    private func isValidEmail(_ email: String) -> Bool {
+        let emailRegEx = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+        let emailPred = NSPredicate(format: "SELF MATCHES %@", emailRegEx)
+        return emailPred.evaluate(with: email)
+    }
+}
+
+struct SocialLoginButton: View {
+    let icon: String
+    let text: String
+    let color: Color
+    
+    var body: some View {
+        Button(action: {
+            print("Social login with \(icon) tapped")
+        }) {
+            HStack(spacing: 12) {
+                Image(icon)
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                Text(text)
+                    .font(.headline)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [color, color.opacity(0.8)]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(12)
+            .shadow(color: color.opacity(0.3), radius: 5, x: 0, y: 5)
+        }
+        .disabled(true)
+        .opacity(0.7)
+    }
+}
+
+#Preview {
+    LoginRegisterView()
+        .environmentObject(UserManager())
+        .environmentObject(GameManager())
+}
+```
+
+---
+
+## File: VoiceViewModel.swift
+
+```swift
+import Foundation
+import AVFoundation
+
+@MainActor
+final class VoiceViewModel: NSObject, ObservableObject {
+    private var audioRecorder: AVAudioRecorder?
+    private var audioPlayer: AVAudioPlayer?
+    @Published var recordedSoundURL: URL?
+    @Published var isRecording: Bool = false
+    
+    private var playbackContinuation: CheckedContinuation<Void, Never>?
+    
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setActive(true)
+        } catch {
+            print("Failed to configure audio session: \(error)")
+        }
+    }
+    
+    func startRecording(for word: String) -> URL? {
+        configureAudioSession()
+        
+        let audioRecorderURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("\(word)_\(UUID().uuidString).m4a")
+        
+        recordedSoundURL = audioRecorderURL
+        
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+        
+        do {
+            audioRecorder = try AVAudioRecorder(url: audioRecorderURL, settings: settings)
+            audioRecorder?.prepareToRecord()
+            audioRecorder?.record()
+            isRecording = true
+            return audioRecorderURL
+        } catch {
+            print("Failed to setup recording: \(error)")
+            isRecording = false
+            return nil
+        }
+    }
+    
+    func stopRecording() {
+        audioRecorder?.stop()
+        isRecording = false
+        audioRecorder = nil
+        
+        if let url = recordedSoundURL {
+            if !FileManager.default.fileExists(atPath: url.path) {
+                print("Recording file not found at: \(url.path)")
+                recordedSoundURL = nil
+            }
+        }
+    }
+    
+    func startPlaying(url: URL, isRemote: Bool = false) async {
+        configureAudioSession()
+        
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            print("Audio file not found at: \(url.path)")
+            return
+        }
+        
+        print("Playing audio from: \(url.path)")
+        
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            
+            audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer?.delegate = self
+            audioPlayer?.prepareToPlay()
+            
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                self.playbackContinuation = continuation
+                if self.audioPlayer?.play() == false {
+                    print("Failed to play audio: playback returned false")
+                    self.playbackContinuation?.resume()
+                    self.playbackContinuation = nil
+                }
+            }
+        } catch {
+            print("Failed to play audio: \(error.localizedDescription)")
+            if let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError {
+                print("Underlying error: \(underlyingError)")
+            }
+        }
+    }
+}
+
+extension VoiceViewModel: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if !flag {
+            print("Audio playback finished unsuccessfully")
+        }
+        Task { @MainActor in
+            self.playbackContinuation?.resume()
+            self.playbackContinuation = nil
+        }
+    }
+    
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        print("Audio player decode error: \(error?.localizedDescription ?? "Unknown error")")
+        Task { @MainActor in
+            self.playbackContinuation?.resume()
+            self.playbackContinuation = nil
+        }
+    }
+}
+```
+
+---
+

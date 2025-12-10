@@ -1,10 +1,3 @@
-//
-//  SpellingBeeTests.swift
-//  SpellingBeeTests
-//
-//  Created by owner on 2025-11-08.
-//
-
 import Testing
 @testable import SpellingBee
 import Foundation
@@ -60,8 +53,8 @@ struct UserGameProgressModelTests {
     func equalityUsesIdentifierOnly() {
         let sharedGameID = UUID()
         
-        var first = UserGameProgress(userID: "user-123", gameID: sharedGameID, completedWordIndices: [0], currentWordIndex: 1, score: 5)
-        var second = UserGameProgress(userID: "user-123", gameID: sharedGameID, completedWordIndices: [0, 2], currentWordIndex: 3, score: 12)
+        let first = UserGameProgress(userID: "user-123", gameID: sharedGameID, completedWordIndices: [0], currentWordIndex: 1, score: 5)
+        let second = UserGameProgress(userID: "user-123", gameID: sharedGameID, completedWordIndices: [0, 2], currentWordIndex: 3, score: 12)
         
         #expect(first == second)
         
@@ -90,6 +83,7 @@ struct MultiUserGameModelTests {
     }
 }
 
+@MainActor
 struct GameManagerUtilityTests {
     
     @Test("Retrieves user by identifier")

@@ -30,7 +30,7 @@ struct ExplodingStarsView: View {
                     .position(x: particle.x, y: particle.y)
             }
         }
-        .onChange(of: isAnimating) {newValue in
+        .onChange(of: isAnimating) { _, newValue in
             if newValue {
                 createExplosion()
             }
@@ -40,7 +40,6 @@ struct ExplodingStarsView: View {
     private func createExplosion() {
         particles = []
         
-        // Create 25 star particles
         for _ in 0..<25 {
             let particle = StarParticle(
                 x: UIScreen.main.bounds.width / 2,
@@ -53,7 +52,6 @@ struct ExplodingStarsView: View {
             particles.append(particle)
         }
         
-        // Animate particles outward
         withAnimation(.easeOut(duration: 1.0)) {
             for i in particles.indices {
                 let angle = Double.random(in: 0...(2 * .pi))
@@ -65,14 +63,12 @@ struct ExplodingStarsView: View {
             }
         }
         
-        // Fade out particles
         withAnimation(.easeOut(duration: 1.0).delay(0.3)) {
             for i in particles.indices {
                 particles[i].opacity = 0
             }
         }
         
-        // Reset animation state
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
             isAnimating = false
             particles = []
@@ -133,7 +129,6 @@ struct CorrectSpellingOverlay: View {
                 showContent = true
             }
             
-            // Auto dismiss after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 withAnimation(.easeOut(duration: 0.3)) {
                     showContent = false
@@ -182,7 +177,6 @@ struct CorrectAnswerOverlay: View {
                 showContent = true
             }
             
-            // Auto dismiss after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 withAnimation(.easeOut(duration: 0.3)) {
                     showContent = false
@@ -202,7 +196,7 @@ struct GamePlayView: View {
     @State private var currentWordIndex = 0
     @State private var userInput = ""
     @State private var isPlaying = false
-    @State private var timer: Timer?
+    @State private var timerTask: Task<Void, Never>?
     @State private var timeElapsed: Double = 0
     @State private var score = 0
     @State private var showCorrectAnswer = false
@@ -233,7 +227,6 @@ struct GamePlayView: View {
                 .edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 16) {
-                // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Spell the Words")
@@ -256,7 +249,6 @@ struct GamePlayView: View {
                 }
                 .padding(.horizontal)
                 
-                // Word Progress
                 VStack(spacing: 8) {
                     ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
                         .progressViewStyle(LinearProgressViewStyle(tint: .blue))
@@ -276,11 +268,13 @@ struct GamePlayView: View {
                 }
                 .padding(.horizontal)
                 
-                // Word Card
                 VStack(spacing: 20) {
                     if !isGameComplete, let word = currentWord {
-                        // Play button
-                        Button(action: playWord) {
+                        Button(action: {
+                            Task {
+                                await playWord()
+                            }
+                        }) {
                             VStack(spacing: 12) {
                                 Image(systemName: isPlaying ? "speaker.wave.3.fill" : "play.circle.fill")
                                     .font(.system(size: 50))
@@ -310,7 +304,6 @@ struct GamePlayView: View {
                         }
                         .disabled(isPlaying || isProcessingAnswer)
                         
-                        // Input field
                         VStack(spacing: 8) {
                             TextField("Type the word you hear", text: $userInput)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -319,7 +312,11 @@ struct GamePlayView: View {
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
                                 .submitLabel(.done)
-                                .onSubmit { checkSpelling() }
+                                .onSubmit {
+                                    Task {
+                                        await checkSpelling()
+                                    }
+                                }
                                 .disabled(isProcessingAnswer)
                             
                             if timeElapsed > 0 {
@@ -330,7 +327,6 @@ struct GamePlayView: View {
                         }
                         
                     } else if isGameComplete {
-                        // Game complete
                         VStack(spacing: 20) {
                             Image(systemName: "trophy.fill")
                                 .font(.system(size: 60))
@@ -385,9 +381,12 @@ struct GamePlayView: View {
                 
                 Spacer()
                 
-                // Action Buttons
                 if !isGameComplete && currentWord != nil {
-                    Button(action: checkSpelling) {
+                    Button(action: {
+                        Task {
+                            await checkSpelling()
+                        }
+                    }) {
                         Text("Submit Answer")
                             .font(.headline)
                             .foregroundColor(.white)
@@ -408,7 +407,6 @@ struct GamePlayView: View {
             }
             .padding()
             
-            // Overlays
             if showWrongAnswer {
                 Color.black.opacity(0.4)
                     .edgesIgnoringSafeArea(.all)
@@ -438,7 +436,6 @@ struct GamePlayView: View {
                 .zIndex(1)
             }
             
-            // Star Explosion Animation
             ExplodingStarsView(isAnimating: $showStarExplosion)
                 .allowsHitTesting(false)
                 .zIndex(2)
@@ -449,8 +446,10 @@ struct GamePlayView: View {
             loadUserProgress()
         }
         .onDisappear {
-            timer?.invalidate()
-            saveUserProgress()
+            timerTask?.cancel()
+            Task {
+                await saveUserProgress()
+            }
         }
     }
     
@@ -470,7 +469,6 @@ struct GamePlayView: View {
             self.score = progress.score
             self.currentWordIndex = progress.currentWordIndex
             
-            // Find next uncompleted word if current is already done
             if completedWordIndices.contains(currentWordIndex) && !isGameComplete {
                 findNextUncompletedWord()
             }
@@ -482,8 +480,8 @@ struct GamePlayView: View {
         }
     }
     
-    private func saveUserProgress() {
-        _ = gameManager.updateUserProgress(
+    private func saveUserProgress() async {
+        _ = await gameManager.updateUserProgress(
             gameID: game.id,
             wordIndex: currentWordIndex,
             completedWordIndices: completedWordIndices,
@@ -501,60 +499,61 @@ struct GamePlayView: View {
         }
     }
     
-    private func playWord() {
+    private func playWord() async {
         guard let word = currentWord, let soundURLString = word.soundURL?.absoluteString else { return }
         
         isPlaying = true
         
-        if let url = URL(string: soundURLString) {
-            URLSession.shared.dataTask(with: url) { data, response, error in
-                guard let data = data, error == nil else {
-                    DispatchQueue.main.async {
-                        self.isPlaying = false
-                    }
-                    return
-                }
-                
-                DispatchQueue.main.async {
-                    do {
-                        self.audioPlayer = try AVAudioPlayer(data: data)
-                        self.audioPlayer?.volume = 1.0
-                        self.audioPlayer?.prepareToPlay()
-                        self.audioPlayer?.play()
-                        
-                        // Start timer only on first play for this word
-                        if self.timeElapsed == 0 {
-                            self.startTimer()
-                        }
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + (self.audioPlayer?.duration ?? 1.0)) {
-                            self.isPlaying = false
-                        }
-                    } catch {
-                        print("Error playing audio: \(error)")
-                        self.isPlaying = false
-                    }
-                }
-            }.resume()
+        guard let url = URL(string: soundURLString) else {
+            isPlaying = false
+            return
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer?.volume = 1.0
+            audioPlayer?.prepareToPlay()
+            audioPlayer?.play()
+            
+            if timeElapsed == 0 {
+                startTimer()
+            }
+            
+            if let duration = audioPlayer?.duration {
+                try await Task.sleep(for: .seconds(duration))
+            }
+            isPlaying = false
+        } catch {
+            print("Error playing audio: \(error)")
+            isPlaying = false
         }
     }
     
     private func startTimer() {
         timeElapsed = 0
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            timeElapsed += 0.1
-            if timeElapsed >= 30 {
-                checkSpelling()
+        timerTask?.cancel()
+        timerTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                await MainActor.run {
+                    timeElapsed += 0.1
+                    if timeElapsed >= 30 {
+                        Task {
+                            await checkSpelling()
+                        }
+                    }
+                }
             }
         }
     }
     
-    private func checkSpelling() {
+    private func checkSpelling() async {
         guard let word = currentWord, !isProcessingAnswer else { return }
         
         isProcessingAnswer = true
-        timer?.invalidate()
+        timerTask?.cancel()
         
         let userAnswer = userInput.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         isCorrect = userAnswer == word.word.lowercased()
@@ -578,7 +577,7 @@ struct GamePlayView: View {
             completedWordIndices.append(currentWordIndex)
         }
         
-        saveUserProgress()
+        await saveUserProgress()
     }
     
     private func moveToNextWord() {
@@ -589,15 +588,11 @@ struct GamePlayView: View {
         audioPlayer = nil
         isProcessingAnswer = false
         
-        // Check if game is complete
         if completedWordIndices.count >= game.wordCount {
-            // Game complete - will show completion screen
-            // Auto-navigate back after a short delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 presentationMode.wrappedValue.dismiss()
             }
         } else {
-            // Find next word
             findNextUncompletedWord()
         }
     }

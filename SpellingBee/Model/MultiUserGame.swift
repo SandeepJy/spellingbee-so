@@ -1,14 +1,14 @@
 import SwiftUI
 
-struct MultiUserGame: Identifiable, Codable, Hashable {
+struct MultiUserGame: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var creatorID: String
     var participantsIDs: Set<String>
     var words: [Word]
     var isStarted: Bool = false
     var hasGeneratedWords: Bool = false
-    var difficultyLevel: Int = 2 // 1: Easy, 2: Medium, 3: Hard
-    var wordCount: Int = 10 // Number of words in the game
+    var difficultyLevel: Int = 2
+    var wordCount: Int = 10
     let creationDate: Date
     
     static func == (lhs: MultiUserGame, rhs: MultiUserGame) -> Bool {

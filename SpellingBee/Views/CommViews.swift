@@ -1,6 +1,5 @@
 import SwiftUI
 
-// Custom TextField Style
 struct ModernTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
@@ -10,4 +9,3 @@ struct ModernTextFieldStyle: TextFieldStyle {
             .foregroundColor(.primary)
     }
 }
-

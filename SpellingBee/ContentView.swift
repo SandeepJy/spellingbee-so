@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import Combine
 import Firebase
 import FirebaseAuth
 import FirebaseFirestore
@@ -22,7 +21,6 @@ struct MainView: View {
                             .foregroundColor(.primary)
                         Spacer()
                         
-                        // Profile/Settings button
                         Button(action: {
                             // TODO: Add profile/settings action
                         }) {
@@ -36,7 +34,6 @@ struct MainView: View {
                                 )
                         }
                         
-                        // Sign out button
                         Button(action: {
                             userManager.signOut()
                         }) {
@@ -47,7 +44,6 @@ struct MainView: View {
                     }
                     .padding(.horizontal)
                     
-                    // Welcome message
                     if let user = gameManager.currentUser {
                         Text("Welcome back, \(user.displayName)!")
                             .font(.title2)
@@ -55,7 +51,6 @@ struct MainView: View {
                             .animation(.easeInOut, value: user.username)
                     }
                     
-                    // Loading indicator while data is being fetched
                     if !gameManager.isDataLoaded {
                         VStack(spacing: 16) {
                             ProgressView()
@@ -65,7 +60,6 @@ struct MainView: View {
                         }
                         .frame(minHeight: 200)
                     } else {
-                        // New Game Button
                         Button(action: { showCreateGameView = true }) {
                             HStack {
                                 Image(systemName: "plus.circle.fill")
@@ -89,14 +83,12 @@ struct MainView: View {
                         }
                         .padding(.horizontal)
                         
-                        // Games Display
                         let userGames = gameManager.games.filter {
                             $0.creatorID == gameManager.currentUser?.id ||
                             $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")
-                        }.sorted { $0.creationDate > $1.creationDate } // Sort by most recent first
+                        }.sorted { $0.creationDate > $1.creationDate }
                         
                         if userGames.isEmpty {
-                            // Empty state
                             VStack(spacing: 20) {
                                 Image(systemName: "gamecontroller")
                                     .font(.system(size: 60))
@@ -114,7 +106,7 @@ struct MainView: View {
                         } else {
                             VStack(spacing: 15) {
                                 ForEach(userGames) { game in
-                                    GameCardView(game: game)
+                                    GameCardView(gameID: game.id)
                                         .environmentObject(gameManager)
                                 }
                             }
@@ -135,7 +127,7 @@ struct MainView: View {
             )
             .navigationBarHidden(true)
             .refreshable {
-                gameManager.loadData()
+                await gameManager.loadData()
             }
         }
     }
@@ -199,12 +191,10 @@ struct UserScoreProgressBar: View {
             
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    // Background
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(.systemGray5))
                         .frame(height: 8)
                     
-                    // Progress fill
                     RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
@@ -224,149 +214,147 @@ struct UserScoreProgressBar: View {
 
 struct GameCardView: View {
     @EnvironmentObject var gameManager: GameManager
-    let game: MultiUserGame
+    let gameID: UUID
     
-    // Best possible score: 90 points per word (100 base - 10 penalty for 5 seconds)
+    private var game: MultiUserGame? {
+        gameManager.games.first { $0.id == gameID }
+    }
+    
     private var bestPossibleScore: Int {
-        return game.wordCount * 90
+        return (game?.wordCount ?? 0) * 90
     }
     
     var body: some View {
-        NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(game.difficultyText)
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(difficultyColor)
-                            .foregroundColor(.white)
-                            .cornerRadius(4)
-                        
-                        Text("Created by \(gameManager.getCreatorName(for: game) ?? "Unknown")")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                    }
-                    
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 2) {
-                        // Active badge
-                        Text("Active")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.green.opacity(0.2))
-                            .foregroundColor(.green)
-                            .cornerRadius(8)
-                        
-                        // Creation date
-                        Text(formattedDate)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Divider()
-                
-                // Game stats
-                HStack(spacing: 30) {
-                    // Player count
-                    VStack(spacing: 4) {
-                        HStack {
-                            Image(systemName: "person.2.fill")
-                                .foregroundColor(.blue)
-                            Text("\(game.participantsIDs.count)")
-                                .fontWeight(.medium)
-                        }
-                        Text("Players")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    // Total words
-                    VStack(spacing: 4) {
-                        HStack {
-                            Image(systemName: "text.book.closed.fill")
-                                .foregroundColor(.orange)
-                            Text("\(game.wordCount)")
-                                .fontWeight(.medium)
-                        }
-                        Text("Words")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    // Best possible score
-                    VStack(spacing: 4) {
-                        HStack {
-                            Image(systemName: "star.fill")
-                                .foregroundColor(.yellow)
-                            Text("\(bestPossibleScore)")
-                                .fontWeight(.medium)
-                        }
-                        Text("Max Pts")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                }
-                
-                // Player Progress with Score Bars
-                if game.hasGeneratedWords {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Player Scores")
+        if let game = game {
+            NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(game.difficultyText)
                                 .font(.caption)
-                                .fontWeight(.semibold)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(difficultyColor)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                            
+                            Text("Created by \(gameManager.getCreatorName(for: game) ?? "Unknown")")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Active")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.green.opacity(0.2))
+                                .foregroundColor(.green)
+                                .cornerRadius(8)
+                            
+                            Text(formattedDate)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Text("Best: \(bestPossibleScore) pts")
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    HStack(spacing: 30) {
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "person.2.fill")
+                                    .foregroundColor(.blue)
+                                Text("\(game.participantsIDs.count)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Players")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
                         
-                        ForEach(Array(game.participantsIDs), id: \.self) { participantID in
-                            if let participant = gameManager.getUser(by: participantID) {
-                                let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
-                                let score = progress?.score ?? 0
-                                let correctCount = progress?.correctlySpelledWords.count ?? 0
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "text.book.closed.fill")
+                                    .foregroundColor(.orange)
+                                Text("\(game.wordCount)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Words")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        VStack(spacing: 4) {
+                            HStack {
+                                Image(systemName: "star.fill")
+                                    .foregroundColor(.yellow)
+                                Text("\(bestPossibleScore)")
+                                    .fontWeight(.medium)
+                            }
+                            Text("Max Pts")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    if game.hasGeneratedWords {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Player Scores")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.secondary)
                                 
-                                UserScoreProgressBar(
-                                    currentScore: score,
-                                    bestPossibleScore: bestPossibleScore,
-                                    userName: participant.displayName,
-                                    correctCount: correctCount,
-                                    totalWords: game.wordCount
-                                )
+                                Spacer()
+                                
+                                Text("Best: \(bestPossibleScore) pts")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            ForEach(Array(game.participantsIDs), id: \.self) { participantID in
+                                if let participant = gameManager.getUser(by: participantID) {
+                                    let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
+                                    let score = progress?.score ?? 0
+                                    let correctCount = progress?.correctlySpelledWords.count ?? 0
+                                    
+                                    UserScoreProgressBar(
+                                        currentScore: score,
+                                        bestPossibleScore: bestPossibleScore,
+                                        userName: participant.displayName,
+                                        correctCount: correctCount,
+                                        totalWords: game.wordCount
+                                    )
+                                }
                             }
                         }
+                        .padding(.top, 4)
                     }
-                    .padding(.top, 4)
                 }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 15)
+                        .fill(Color(.systemGray6))
+                        .shadow(color: Color.gray.opacity(0.2), radius: 5)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 15)
+                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                )
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 15)
-                    .fill(Color(.systemGray6))
-                    .shadow(color: Color.gray.opacity(0.2), radius: 5)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
-            )
+            .buttonStyle(PlainButtonStyle())
         }
-        .buttonStyle(PlainButtonStyle())
     }
     
     private var difficultyColor: Color {
+        guard let game = game else { return .orange }
         switch game.difficultyLevel {
         case 1: return .green
         case 2: return .orange
@@ -376,6 +364,7 @@ struct GameCardView: View {
     }
     
     private var formattedDate: String {
+        guard let game = game else { return "" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: game.creationDate, relativeTo: Date())
@@ -422,7 +411,6 @@ struct PlayerProgressRow: View {
     }
 }
 
-// Status Badge
 struct StatusBadge: View {
     let isStarted: Bool
     
@@ -438,7 +426,6 @@ struct StatusBadge: View {
     }
 }
 
-// Word Progress Row
 struct WordProgressRow: View {
     let participant: SpellGameUser
     let game: MultiUserGame
@@ -497,7 +484,6 @@ struct ContentView: View {
     }
 }
 
-// Participant Row (reused from previous code)
 struct ParticipantRow: View {
     let participant: SpellGameUser?
     let game: MultiUserGame

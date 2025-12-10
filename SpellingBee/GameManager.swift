@@ -81,42 +81,7 @@ final class GameManager: ObservableObject {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         return paths[0]
     }
-    
-//    func uploadAudio(gameID: UUID, url: URL, word: String) async -> String? {
-//        guard userManager?.isAuthenticated == true else {
-//            return nil
-//        }
-//        
-//        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
-//        
-//        do {
-//            _ = try await storageRef.putFileAsync(from: url)
-//            let downloadURL = try await storageRef.downloadURL()
-//            return downloadURL.absoluteString
-//        } catch {
-//            print("Error uploading audio: \(error)")
-//            return nil
-//        }
-//    }
-//    
-//    func downloadAudio(gameID: UUID, word: String) async -> URL? {
-//        guard userManager?.isAuthenticated == true else {
-//            return nil
-//        }
-//        
-//        let storageRef = storage.reference().child("recordings/\(gameID)\(word).m4a")
-//        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-//        let fileURL = documentsURL.appendingPathComponent("\(gameID)\(word).m4a")
-//        
-//        do {
-//            _ = try await storageRef.writeAsync(toFile: fileURL)
-//            return fileURL
-//        } catch {
-//            print("Error downloading audio: \(error)")
-//            return nil
-//        }
-//    }
-    
+        
     func addUser(id: String, username: String, email: String) async {
         guard userManager?.isAuthenticated == true else {
             print("Cannot add user: Not authenticated")
@@ -419,11 +384,19 @@ final class GameManager: ObservableObject {
             
             Task { @MainActor [weak self] in
                 let newGames = documents.compactMap { document -> MultiUserGame? in
-                    let game = try? document.data(as: MultiUserGame.self)
-                    if let game = game {
-                        print("🔔 Real-time update: Game \(game.id) has \(game.words.count) words")
+                    do {
+                        let game = try document.data(as: MultiUserGame.self)
+                        print("🔔 Real-time update: Game \(game.id)")
+                        print("   - has \(game.words.count) words")
+                        print("   - hasGeneratedWords: \(game.hasGeneratedWords)")  // Add this debug line
+                        print("   - isStarted: \(game.isStarted)")
+                        return game
+                    } catch {
+                        print("❌ Error decoding game: \(error)")
+                        // Print the raw document data to see what's in Firestore
+                        print("   Raw data: \(document.data())")
+                        return nil
                     }
-                    return game
                 }
                 self?.games = newGames
                 print("🔔 Games updated via listener: \(newGames.count) total")

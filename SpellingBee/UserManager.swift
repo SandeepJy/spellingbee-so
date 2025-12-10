@@ -10,7 +10,7 @@ final class UserManager: ObservableObject {
     @Published var isAuthenticated = false
     
     private let db = Firestore.firestore()
-    private var authStateListener: AuthStateDidChangeListenerHandle?
+    nonisolated(unsafe)private var authStateListener: AuthStateDidChangeListenerHandle?
     
     init() {
         setupAuthStateListener()

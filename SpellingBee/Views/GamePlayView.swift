@@ -210,6 +210,7 @@ struct GamePlayView: View {
     @State private var lastUserAnswer: String = ""
     @State private var lastPoints: Int = 0
     @State private var isProcessingAnswer = false
+    @State private var showKeyboard = false
     @Environment(\.presentationMode) var presentationMode
     
     private var currentWord: Word? {
@@ -221,55 +222,65 @@ struct GamePlayView: View {
         return completedWordIndices.count >= game.wordCount
     }
     
+    private var shouldShowKeyboard: Bool {
+        return !isGameComplete && currentWord != nil && !showCorrectAnswer && !showWrongAnswer
+    }
+    
     var body: some View {
         ZStack {
             Color(.systemBackground)
                 .edgesIgnoringSafeArea(.all)
             
-            VStack(spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Spell the Words")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(.primary)
-                        Text("\(game.difficultyText) - \(game.wordCount) words")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Score: \(score)")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.blue)
-                        Text("\(correctlySpelledWords.count) correct")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
-                }
-                .padding(.horizontal)
-                
-                VStack(spacing: 8) {
-                    ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
-                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                        .scaleEffect(y: 1.5)
-                        .animation(.easeInOut, value: completedWordIndices.count)
-                    
+            VStack(spacing: 0) {
+                // Header Section
+                VStack(spacing: 16) {
                     HStack {
-                        Text("Word \(min(completedWordIndices.count + 1, game.wordCount)) of \(game.wordCount)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Spell the Words")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(.primary)
+                            Text("\(game.difficultyText) - \(game.wordCount) words")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         Spacer()
-                        Text("\(correctlySpelledWords.count)/\(game.wordCount) correct")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Score: \(score)")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(.blue)
+                            Text("\(correctlySpelledWords.count) correct")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+                    }
+                    
+                    // Progress Section
+                    VStack(spacing: 8) {
+                        ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
+                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                            .scaleEffect(y: 1.5)
+                            .animation(.easeInOut, value: completedWordIndices.count)
+                        
+                        HStack {
+                            Text("Word \(min(completedWordIndices.count + 1, game.wordCount)) of \(game.wordCount)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(correctlySpelledWords.count)/\(game.wordCount) correct")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.green)
+                        }
                     }
                 }
                 .padding(.horizontal)
+                .padding(.top)
                 
-                VStack(spacing: 20) {
-                    if !isGameComplete, let word = currentWord {
+                // Main Content
+                if !isGameComplete, let word = currentWord {
+                    VStack(spacing: 20) {
+                        // Play Button
                         Button(action: {
                             Task {
                                 await playWord()
@@ -304,20 +315,12 @@ struct GamePlayView: View {
                         }
                         .disabled(isPlaying || isProcessingAnswer)
                         
+                        // Input Display (replaces TextField)
                         VStack(spacing: 8) {
-                            TextField("Type the word you hear", text: $userInput)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .font(.title2)
-                                .multilineTextAlignment(.center)
-                                .autocapitalization(.none)
-                                .disableAutocorrection(true)
-                                .submitLabel(.done)
-                                .onSubmit {
-                                    Task {
-                                        await checkSpelling()
-                                    }
-                                }
-                                .disabled(isProcessingAnswer)
+                            SpellingInputDisplay(
+                                text: userInput,
+                                placeholder: "Type the word you hear..."
+                            )
                             
                             if timeElapsed > 0 {
                                 Text("Time: \(String(format: "%.1f", timeElapsed))s")
@@ -325,88 +328,83 @@ struct GamePlayView: View {
                                     .foregroundColor(.orange)
                             }
                         }
-                        
-                    } else if isGameComplete {
-                        VStack(spacing: 20) {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 60))
-                                .foregroundColor(.yellow)
-                            
-                            Text("Game Complete!")
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            
-                            VStack(spacing: 8) {
-                                Text("Final Score: \(score)")
-                                    .font(.title2)
-                                    .foregroundColor(.blue)
-                                
-                                Text("Correctly Spelled: \(correctlySpelledWords.count)/\(game.wordCount)")
-                                    .font(.headline)
-                                    .foregroundColor(.green)
-                                
-                                let bestPossible = game.wordCount * 90
-                                let percentage = bestPossible > 0 ? (Double(score) / Double(bestPossible)) * 100 : 0
-                                Text("Score Efficiency: \(String(format: "%.1f", percentage))%")
-                                    .font(.subheadline)
-                                    .foregroundColor(.purple)
-                            }
-                            
-                            Button(action: {
-                                presentationMode.wrappedValue.dismiss()
-                            }) {
-                                HStack {
-                                    Image(systemName: "house.fill")
-                                    Text("Back to Games")
-                                }
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                            }
-                            .padding(.top, 10)
-                        }
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(15)
                     }
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(15)
-                .shadow(radius: 5)
-                
-                Spacer()
-                
-                if !isGameComplete && currentWord != nil {
-                    Button(action: {
-                        Task {
-                            await checkSpelling()
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(15)
+                    .shadow(radius: 5)
+                    .padding(.horizontal)
+                    .padding(.top)
+                    
+                    Spacer()
+                    
+                } else if isGameComplete {
+                    VStack(spacing: 20) {
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.yellow)
+                        
+                        Text("Game Complete!")
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        VStack(spacing: 8) {
+                            Text("Final Score: \(score)")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                            
+                            Text("Correctly Spelled: \(correctlySpelledWords.count)/\(game.wordCount)")
+                                .font(.headline)
+                                .foregroundColor(.green)
+                            
+                            let bestPossible = game.wordCount * 90
+                            let percentage = bestPossible > 0 ? (Double(score) / Double(bestPossible)) * 100 : 0
+                            Text("Score Efficiency: \(String(format: "%.1f", percentage))%")
+                                .font(.subheadline)
+                                .foregroundColor(.purple)
                         }
-                    }) {
-                        Text("Submit Answer")
+                        
+                        Button(action: {
+                            presentationMode.wrappedValue.dismiss()
+                        }) {
+                            HStack {
+                                Image(systemName: "house.fill")
+                                Text("Back to Games")
+                            }
                             .font(.headline)
                             .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
                             .padding()
-                            .background(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.green, Color.blue]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
+                            .frame(maxWidth: .infinity)
+                            .background(Color.blue)
                             .cornerRadius(12)
+                        }
+                        .padding(.top, 10)
                     }
-                    .disabled(userInput.isEmpty || isProcessingAnswer)
-                    .opacity((userInput.isEmpty || isProcessingAnswer) ? 0.6 : 1.0)
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(15)
+                    .padding(.horizontal)
+                    
+                    Spacer()
+                }
+                
+                // Custom Keyboard (always at bottom when active)
+                if shouldShowKeyboard {
+                    CustomKeyboardView(
+                        text: $userInput,
+                        onSubmit: {
+                            Task {
+                                await checkSpelling()
+                            }
+                        },
+                        isDisabled: isProcessingAnswer
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .padding()
             
+            // Overlays
             if showWrongAnswer {
                 Color.black.opacity(0.4)
                     .edgesIgnoringSafeArea(.all)
@@ -451,6 +449,7 @@ struct GamePlayView: View {
                 await saveUserProgress()
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: shouldShowKeyboard)
     }
     
     private func configureAudioSession() {

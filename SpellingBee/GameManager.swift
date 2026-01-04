@@ -4,6 +4,7 @@ import Firebase
 import FirebaseFirestore
 import FirebaseStorage
 import AVFoundation
+import FirebaseAuth
 
 @MainActor
 final class GameManager: ObservableObject {
@@ -125,21 +126,37 @@ final class GameManager: ObservableObject {
             throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
         }
         
-        print("🎲 Generating \(wordCount) words for game...")
+        print("🎲 Generating \(wordCount) words for game with difficulty: \(difficulty)...")
         
-        let wordLength: Int
-        switch difficulty {
-        case 1:
-            wordLength = Int.random(in: 3...4)
-        case 2:
-            wordLength = 5
-        case 3:
-            wordLength = Int.random(in: 5...6)
-        default:
-            wordLength = 5
+        let wordsData: [WordWithDetails]
+        
+        if difficulty == 3 { // Hard difficulty - use Firebase API for words
+            guard let user = Auth.auth().currentUser else {
+                throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+            }
+            
+            let token = try await user.getIDToken()
+            
+            wordsData = try await WordAPIService.shared.fetchHardWordsWithDetails(
+                count: wordCount,
+                userToken: token
+            )
+        } else { // Easy and Medium difficulty - use public random word API
+            let wordLength: Int
+            switch difficulty {
+            case 1:
+                wordLength = Int.random(in: 3...4)
+            case 2:
+                wordLength = 5
+            default:
+                wordLength = 5
+            }
+            
+            wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(
+                count: wordCount,
+                length: wordLength
+            )
         }
-        
-        let wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(count: wordCount, length: wordLength)
         
         print("✅ Successfully fetched \(wordsData.count) words from API")
         

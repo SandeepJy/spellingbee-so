@@ -7,6 +7,7 @@ enum WordAPIError: Error, Sendable {
     case noAudioAvailable
     case networkError(String)
     case insufficientWords
+    case authenticationRequired
     
     var localizedDescription: String {
         switch self {
@@ -22,6 +23,8 @@ enum WordAPIError: Error, Sendable {
             return "Network error: \(message)"
         case .insufficientWords:
             return "Could not fetch enough words with audio"
+        case .authenticationRequired:
+            return "Authentication required for this operation"
         }
     }
 }
@@ -32,12 +35,20 @@ struct WordWithDetails: Sendable {
     let definition: String?
 }
 
+/// Response structure for the Firebase hard words API
+struct HardWordsResponse: Codable, Sendable {
+    let words: [String]
+}
+
 actor WordAPIService {
     static let shared = WordAPIService()
     
+    // TODO: Replace with your actual Firebase API endpoint
+    private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getRandomWords"
+    
     private init() {}
     
-    /// Fetches random words from the API
+    /// Fetches random words from the public API (for easy/medium difficulty)
     func fetchRandomWords(count: Int = 10, length: Int = 5) async throws -> [String] {
         let urlString = "https://random-word-api.vercel.app/api?words=\(count)&length=\(length)"
         
@@ -50,6 +61,42 @@ actor WordAPIService {
         do {
             let words = try JSONDecoder().decode([String].self, from: data)
             return words
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
+    }
+    
+    /// Fetches hard difficulty words from Firebase API (requires authentication)
+    func fetchHardWords(count: Int, userToken: String) async throws -> [String] {
+        let urlString = "\(hardWordsAPIEndpoint)?count=\(count)"
+        
+        guard let url = URL(string: urlString) else {
+            throw WordAPIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(userToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        print("🔥 Fetching hard words from Firebase API...")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WordAPIError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            print("❌ Firebase API returned status code: \(httpResponse.statusCode)")
+            throw WordAPIError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+        
+        do {
+            let hardWordsResponse = try JSONDecoder().decode(HardWordsResponse.self, from: data)
+            print("✅ Received \(hardWordsResponse.words.count) hard words from Firebase")
+            return hardWordsResponse.words
         } catch {
             print("Decoding error: \(error)")
             throw WordAPIError.decodingError
@@ -81,7 +128,7 @@ actor WordAPIService {
         }
     }
     
-    /// Fetches random words with their details and audio URLs
+    /// Fetches random words with their details and audio URLs (for easy/medium difficulty)
     func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5) async throws -> [WordWithDetails] {
         let requestCount = count * 3
         
@@ -90,6 +137,23 @@ actor WordAPIService {
         let words = try await fetchRandomWords(count: requestCount, length: length)
         print("📥 Received \(words.count) words from random word API")
         
+        return try await fetchDetailsForWords(words: words, targetCount: count)
+    }
+    
+    /// Fetches hard words with their details and audio URLs (for hard difficulty)
+    func fetchHardWordsWithDetails(count: Int, userToken: String) async throws -> [WordWithDetails] {
+        let requestCount = count // Request extra in case some don't have audio
+        
+        print("🔥 Requesting \(requestCount) hard words from Firebase API to get \(count) with audio...")
+        
+        let words = try await fetchHardWords(count: requestCount, userToken: userToken)
+        print("📥 Received \(words.count) hard words from Firebase API")
+        
+        return try await fetchDetailsForWords(words: words, targetCount: count)
+    }
+    
+    /// Helper function to fetch details for a list of words
+    private func fetchDetailsForWords(words: [String], targetCount: Int) async throws -> [WordWithDetails] {
         var wordsWithDetails: [WordWithDetails] = []
         
         await withTaskGroup(of: WordWithDetails?.self) { group in
@@ -114,7 +178,7 @@ actor WordAPIService {
             for await result in group {
                 if let wordWithDetails = result {
                     wordsWithDetails.append(wordWithDetails)
-                    if wordsWithDetails.count >= count {
+                    if wordsWithDetails.count >= targetCount {
                         group.cancelAll()
                         break
                     }
@@ -122,9 +186,9 @@ actor WordAPIService {
             }
         }
         
-        print("✅ Found \(wordsWithDetails.count) words with audio (needed \(count))")
+        print("✅ Found \(wordsWithDetails.count) words with audio (needed \(targetCount))")
         
-        let finalWords = Array(wordsWithDetails.prefix(count))
+        let finalWords = Array(wordsWithDetails.prefix(targetCount))
         
         if finalWords.isEmpty {
             throw WordAPIError.noAudioAvailable

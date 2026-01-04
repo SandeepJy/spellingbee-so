@@ -25,6 +25,7 @@
 		EB5FC8802EE49B3C00B1718E /* RandomWordResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */; };
 		EB5FC8822EE49B6300B1718E /* DictionaryResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */; };
 		EB5FC8862EE49BD600B1718E /* WordApiService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8852EE49BCF00B1718E /* WordApiService.swift */; };
+		EB64260E2F09A34E002E3247 /* CustomKeywordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB64260D2F09A347002E3247 /* CustomKeywordView.swift */; };
 		EB70CDA42DAB429800C2F52E /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = EB70CDA32DAB429800C2F52E /* FirebaseCore */; };
 		EB70CDA62DAB431400C2F52E /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB70CDA52DAB431400C2F52E /* UserManager.swift */; };
 		EB70CDA82DAB435E00C2F52E /* SpellGameUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB70CDA72DAB435E00C2F52E /* SpellGameUser.swift */; };
@@ -63,6 +64,7 @@
 		EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandomWordResponse.swift; sourceTree = "<group>"; };
 		EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryResponse.swift; sourceTree = "<group>"; };
 		EB5FC8852EE49BCF00B1718E /* WordApiService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordApiService.swift; sourceTree = "<group>"; };
+		EB64260D2F09A347002E3247 /* CustomKeywordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomKeywordView.swift; sourceTree = "<group>"; };
 		EB70CDA52DAB431400C2F52E /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		EB70CDA72DAB435E00C2F52E /* SpellGameUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpellGameUser.swift; sourceTree = "<group>"; };
 		EB70CDAA2DAB43A200C2F52E /* LoginRegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginRegisterView.swift; sourceTree = "<group>"; };
@@ -176,6 +178,7 @@
 		EB70CDA92DAB438300C2F52E /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				EB64260D2F09A347002E3247 /* CustomKeywordView.swift */,
 				EB2E55D92DD61EA900B8DCA5 /* CommViews.swift */,
 				EB5C412A2DCAE59C00D1CE9D /* GamePlayView.swift */,
 				EB5C41282DCAE52000D1CE9D /* CreateGameView.swift */,
@@ -311,6 +314,7 @@
 				EBCF9D192DD6D8E900AC45DE /* SpellGameUser+DisplayName.swift in Sources */,
 				EB5FC8822EE49B6300B1718E /* DictionaryResponse.swift in Sources */,
 				EB3A8D9F2DED3E3A007D469B /* UserGameProgress.swift in Sources */,
+				EB64260E2F09A34E002E3247 /* CustomKeywordView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

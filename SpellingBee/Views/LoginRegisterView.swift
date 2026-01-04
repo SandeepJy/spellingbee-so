@@ -43,7 +43,14 @@ struct LoginRegisterView: View {
                 SecureField("Password", text: $password)
                     .textFieldStyle(ModernTextFieldStyle())
                     .textContentType(isRegistering ? .newPassword : .password)
-                
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if isFormValid {
+                            Task {
+                                await handleAuth()
+                            }
+                        }
+                    }
                 if let errorMessage = errorMessage {
                     Text(errorMessage)
                         .foregroundColor(.red)

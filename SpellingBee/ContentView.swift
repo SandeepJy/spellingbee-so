@@ -86,7 +86,18 @@ struct MainView: View {
                         let userGames = gameManager.games.filter {
                             $0.creatorID == gameManager.currentUser?.id ||
                             $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")
-                        }.sorted { $0.creationDate > $1.creationDate }
+                        }.sorted { game1, game2 in
+                            let game1Started = gameManager.hasUserStartedGame(game1)
+                            let game2Started = gameManager.hasUserStartedGame(game2)
+                            
+                            if game1Started && !game2Started {
+                                return true
+                            } else if !game1Started && game2Started {
+                                return false
+                            } else {
+                                return game1.creationDate > game2.creationDate
+                            }
+                        }
                         
                         if userGames.isEmpty {
                             VStack(spacing: 20) {
@@ -247,14 +258,32 @@ struct GameCardView: View {
                         Spacer()
                         
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("Active")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.green.opacity(0.2))
-                                .foregroundColor(.green)
-                                .cornerRadius(8)
+                            if gameManager.isGameFinished(game) {
+                                if let winner = gameManager.getGameWinner(game) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "trophy.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.yellow)
+                                        Text(winner.id == gameManager.currentUser?.id ? "You won!" : "\(winner.displayName) won")
+                                            .font(.caption)
+                                            .fontWeight(.bold)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.yellow.opacity(0.2))
+                                    .foregroundColor(.orange)
+                                    .cornerRadius(8)
+                                }
+                            } else {
+                                Text("Active")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.green.opacity(0.2))
+                                    .foregroundColor(.green)
+                                    .cornerRadius(8)
+                            }
                             
                             Text(formattedDate)
                                 .font(.caption2)
@@ -509,4 +538,39 @@ struct ParticipantRow: View {
 
 #Preview {
     ContentView()
+}
+
+
+// Add this extension at the bottom of ContentView.swift
+extension GameManager {
+    func isGameFinished(_ game: MultiUserGame) -> Bool {
+        return game.participantsIDs.allSatisfy { participantID in
+            let progress = getUserProgress(for: game.id, userID: participantID)
+            return (progress?.completedWordIndices.count ?? 0) >= game.wordCount
+        }
+    }
+    
+    func getGameWinner(_ game: MultiUserGame) -> SpellGameUser? {
+        guard isGameFinished(game) else { return nil }
+        
+        var highestScore = 0
+        var winnerId: String?
+        
+        for participantID in game.participantsIDs {
+            if let progress = getUserProgress(for: game.id, userID: participantID) {
+                if progress.score > highestScore {
+                    highestScore = progress.score
+                    winnerId = participantID
+                }
+            }
+        }
+        
+        return winnerId != nil ? getUser(by: winnerId!) : nil
+    }
+    
+    func hasUserStartedGame(_ game: MultiUserGame) -> Bool {
+        guard let userID = currentUser?.id else { return false }
+        let progress = getUserProgress(for: game.id, userID: userID)
+        return progress != nil && progress!.completedWordIndices.count > 0
+    }
 }

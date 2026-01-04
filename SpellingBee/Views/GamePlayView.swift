@@ -670,7 +670,6 @@ struct GamePlayView: View {
     @State private var gameWinner: SpellGameUser? = nil
     @State private var allPlayersFinished = false
     @State private var nextGames: [MultiUserGame] = []
-    @State private var pollTimer: Timer? = nil
     
     // MARK: - Computed Properties
     private var hasUserFinished: Bool {
@@ -790,6 +789,20 @@ struct GamePlayView: View {
         .navigationBarBackButtonHidden(false)
         .onAppear(perform: handleViewAppear)
         .onDisappear(perform: handleViewDisappear)
+        .task(id: hasUserFinished) {
+                // This task automatically cancels when the view disappears
+                guard hasUserFinished else { return }
+                
+                while !Task.isCancelled && !allPlayersFinished {
+                    checkIfAllPlayersFinished()
+                    
+                    if allPlayersFinished {
+                        break
+                    }
+                    
+                    try? await Task.sleep(for: .seconds(5))
+                }
+            }
         .animation(.easeInOut(duration: 0.3), value: shouldShowKeyboard)
     }
     
@@ -809,14 +822,11 @@ extension GamePlayView {
         loadNextGames()
         if hasUserFinished {
             checkIfAllPlayersFinished()
-            startPollingForCompletion()
         }
     }
     
     private func handleViewDisappear() {
         timerTask?.cancel()
-        pollTimer?.invalidate()
-        pollTimer = nil
         Task {
             await saveUserProgress()
         }
@@ -881,15 +891,6 @@ extension GamePlayView {
                         Task { await checkSpelling() }
                     }
                 }
-            }
-        }
-    }
-    
-    private func startPollingForCompletion() {
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            if hasUserFinished && !allPlayersFinished {
-                checkIfAllPlayersFinished()
             }
         }
     }
@@ -980,11 +981,7 @@ extension GamePlayView {
         audioPlayer = nil
         isProcessingAnswer = false
         
-        if completedWordIndices.count >= game.wordCount {
-            startPollingForCompletion()
-        } else {
-            findNextUncompletedWord()
-        }
+        findNextUncompletedWord()
     }
     
     private func calculatePoints() -> Int {

@@ -212,6 +212,16 @@ struct GamePlayView: View {
     @State private var isProcessingAnswer = false
     @State private var showKeyboard = false
     @Environment(\.presentationMode) var presentationMode
+    @State private var showingWaitingForPlayers = false
+    @State private var gameWinner: SpellGameUser? = nil
+    @State private var allPlayersFinished = false
+    @State private var nextGames: [MultiUserGame] = []
+    
+    private var hasUserFinished: Bool {
+        completedWordIndices.count >= game.wordCount
+    }
+
+
     
     private var currentWord: Word? {
         guard currentWordIndex < game.words.count else { return nil }
@@ -231,56 +241,50 @@ struct GamePlayView: View {
             Color(.systemBackground)
                 .edgesIgnoringSafeArea(.all)
             
-            VStack(spacing: 0) {
-                // Header Section
-                VStack(spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Spell the Words")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.primary)
-                            Text("\(game.difficultyText) - \(game.wordCount) words")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("Score: \(score)")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(.blue)
-                            Text("\(correctlySpelledWords.count) correct")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
+            VStack(spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Spell the Words")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.primary)
+                        Text("\(game.difficultyText) - \(game.wordCount) words")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    
-                    // Progress Section
-                    VStack(spacing: 8) {
-                        ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
-                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                            .scaleEffect(y: 1.5)
-                            .animation(.easeInOut, value: completedWordIndices.count)
-                        
-                        HStack {
-                            Text("Word \(min(completedWordIndices.count + 1, game.wordCount)) of \(game.wordCount)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(correctlySpelledWords.count)/\(game.wordCount) correct")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.green)
-                        }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Score: \(score)")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                        Text("\(correctlySpelledWords.count) correct")
+                            .font(.caption)
+                            .foregroundColor(.green)
                     }
                 }
                 .padding(.horizontal)
-                .padding(.top)
                 
-                // Main Content
-                if !isGameComplete, let word = currentWord {
-                    VStack(spacing: 20) {
-                        // Play Button
+                VStack(spacing: 8) {
+                    ProgressView(value: Double(completedWordIndices.count), total: Double(game.wordCount))
+                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        .scaleEffect(y: 1.5)
+                        .animation(.easeInOut, value: completedWordIndices.count)
+                    
+                    HStack {
+                        Text("Word \(min(completedWordIndices.count + 1, game.wordCount)) of \(game.wordCount)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(correctlySpelledWords.count)/\(game.wordCount) correct")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal)
+                
+                VStack(spacing: 20) {
+                    if !isGameComplete, let word = currentWord {
                         Button(action: {
                             Task {
                                 await playWord()
@@ -315,7 +319,6 @@ struct GamePlayView: View {
                         }
                         .disabled(isPlaying || isProcessingAnswer)
                         
-                        // Input Display (replaces TextField)
                         VStack(spacing: 8) {
                             SpellingInputDisplay(
                                 text: userInput,
@@ -328,75 +331,182 @@ struct GamePlayView: View {
                                     .foregroundColor(.orange)
                             }
                         }
-                    }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(15)
-                    .shadow(radius: 5)
-                    .padding(.horizontal)
-                    .padding(.top)
-                    
-                    Spacer()
-                    
-                } else if isGameComplete {
-                    VStack(spacing: 20) {
-                        Image(systemName: "trophy.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(.yellow)
                         
-                        Text("Game Complete!")
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        
-                        VStack(spacing: 8) {
-                            Text("Final Score: \(score)")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                            
-                            Text("Correctly Spelled: \(correctlySpelledWords.count)/\(game.wordCount)")
-                                .font(.headline)
-                                .foregroundColor(.green)
-                            
-                            let bestPossible = game.wordCount * 90
-                            let percentage = bestPossible > 0 ? (Double(score) / Double(bestPossible)) * 100 : 0
-                            Text("Score Efficiency: \(String(format: "%.1f", percentage))%")
-                                .font(.subheadline)
-                                .foregroundColor(.purple)
-                        }
-                        
-                        Button(action: {
-                            presentationMode.wrappedValue.dismiss()
-                        }) {
-                            HStack {
-                                Image(systemName: "house.fill")
-                                Text("Back to Games")
+                    } else if hasUserFinished {
+                        VStack(spacing: 20) {
+                            if !allPlayersFinished {
+                                // Waiting for other players
+                                VStack(spacing: 20) {
+                                    Image(systemName: "hourglass")
+                                        .font(.system(size: 60))
+                                        .foregroundColor(.orange)
+                                        .symbolEffect(.pulse)
+                                    
+                                    Text("All words entered!")
+                                        .font(.title)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.primary)
+                                    
+                                    Text("Waiting for other players to finish...")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                    
+                                    // Show player progress
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text("Player Progress:")
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.secondary)
+                                        
+                                        ForEach(Array(game.participantsIDs), id: \.self) { participantID in
+                                            if let participant = gameManager.getUser(by: participantID) {
+                                                let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
+                                                let completed = progress?.completedWordIndices.count ?? 0
+                                                
+                                                HStack {
+                                                    Circle()
+                                                        .fill(completed >= game.wordCount ? Color.green : Color.gray)
+                                                        .frame(width: 10, height: 10)
+                                                    
+                                                    Text(participant.displayName)
+                                                        .font(.subheadline)
+                                                        .foregroundColor(.primary)
+                                                    
+                                                    Spacer()
+                                                    
+                                                    if completed >= game.wordCount {
+                                                        Image(systemName: "checkmark.circle.fill")
+                                                            .foregroundColor(.green)
+                                                            .font(.caption)
+                                                    } else {
+                                                        Text("\(completed)/\(game.wordCount)")
+                                                            .font(.caption)
+                                                            .foregroundColor(.secondary)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding()
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                }
+                                
+                            } else {
+                                // All players finished - show winner
+                                VStack(spacing: 20) {
+                                    Image(systemName: "trophy.fill")
+                                        .font(.system(size: 60))
+                                        .foregroundColor(.yellow)
+                                    
+                                    Text("Game Complete!")
+                                        .font(.title)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.primary)
+                                    
+                                    if let winner = gameWinner {
+                                        VStack(spacing: 8) {
+                                            Text("Winner:")
+                                                .font(.headline)
+                                                .foregroundColor(.secondary)
+                                            
+                                            HStack {
+                                                Circle()
+                                                    .fill(Color.yellow.opacity(0.3))
+                                                    .frame(width: 40, height: 40)
+                                                    .overlay(
+                                                        Text(winner.initialLetter)
+                                                            .fontWeight(.bold)
+                                                            .foregroundColor(.orange)
+                                                    )
+                                                
+                                                Text(winner.displayName)
+                                                    .font(.title2)
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(.primary)
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Final scores
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Final Scores:")
+                                            .font(.headline)
+                                            .padding(.bottom, 4)
+                                        
+                                        ForEach(getSortedScores(), id: \.userID) { scoreData in
+                                            HStack {
+                                                Text(scoreData.displayName)
+                                                    .foregroundColor(.primary)
+                                                Spacer()
+                                                Text("\(scoreData.score) pts")
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(scoreData.userID == gameWinner?.id ? .yellow : .blue)
+                                            }
+                                        }
+                                    }
+                                    .padding()
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                }
                             }
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.blue)
-                            .cornerRadius(12)
+                            
+                            // Next games section
+                            if !nextGames.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Next Games:")
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    ScrollView {
+                                        VStack(spacing: 10) {
+                                            ForEach(nextGames.prefix(3)) { nextGame in
+                                                NextGameRow(game: nextGame, gameManager: gameManager)
+                                            }
+                                        }
+                                    }
+                                    .frame(maxHeight: 200)
+                                }
+                                .padding(.top, 20)
+                            }
+                            
+                            Button(action: {
+                                presentationMode.wrappedValue.dismiss()
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.left.circle.fill")
+                                    Text("Back to Games")
+                                }
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue)
+                                .cornerRadius(12)
+                            }
+                            .padding(.top, 10)
                         }
-                        .padding(.top, 10)
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(15)
                     }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(15)
-                    .padding(.horizontal)
-                    
-                    Spacer()
+
                 }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(15)
+                .shadow(radius: 5)
+                
+                Spacer()
                 
                 // Custom Keyboard (always at bottom when active)
                 if shouldShowKeyboard {
                     CustomKeyboardView(
                         text: $userInput,
                         onSubmit: {
-                            Task {
-                                await checkSpelling()
-                            }
+                        Task {
+                            await checkSpelling()
+                        }
                         },
                         isDisabled: isProcessingAnswer
                     )
@@ -404,7 +514,6 @@ struct GamePlayView: View {
                 }
             }
             
-            // Overlays
             if showWrongAnswer {
                 Color.black.opacity(0.4)
                     .edgesIgnoringSafeArea(.all)
@@ -442,6 +551,17 @@ struct GamePlayView: View {
         .onAppear {
             configureAudioSession()
             loadUserProgress()
+            loadNextGames()
+            if hasUserFinished {
+                checkIfAllPlayersFinished()
+                
+                // Start polling for game completion
+                Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+                    if hasUserFinished && !allPlayersFinished {
+                        checkIfAllPlayersFinished()
+                    }
+                }
+            }
         }
         .onDisappear {
             timerTask?.cancel()
@@ -451,6 +571,71 @@ struct GamePlayView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: shouldShowKeyboard)
     }
+    
+    // Add these helper functions
+    private func checkIfAllPlayersFinished() {
+        let allFinished = game.participantsIDs.allSatisfy { participantID in
+            let progress = gameManager.getUserProgress(for: game.id, userID: participantID)
+            return (progress?.completedWordIndices.count ?? 0) >= game.wordCount
+        }
+        
+        allPlayersFinished = allFinished
+        
+        if allFinished {
+            determineWinner()
+        }
+    }
+
+    private func determineWinner() {
+        var highestScore = 0
+        var winnerId: String?
+        
+        for participantID in game.participantsIDs {
+            if let progress = gameManager.getUserProgress(for: game.id, userID: participantID) {
+                if progress.score > highestScore {
+                    highestScore = progress.score
+                    winnerId = participantID
+                }
+            }
+        }
+        
+        if let winnerId = winnerId {
+            gameWinner = gameManager.getUser(by: winnerId)
+        }
+    }
+
+    private func getSortedScores() -> [(userID: String, displayName: String, score: Int)] {
+        return game.participantsIDs.compactMap { participantID in
+            guard let user = gameManager.getUser(by: participantID),
+                  let progress = gameManager.getUserProgress(for: game.id, userID: participantID) else {
+                return nil
+            }
+            return (userID: participantID, displayName: user.displayName, score: progress.score)
+        }.sorted { $0.score > $1.score }
+    }
+
+    private func loadNextGames() {
+        let allGames = gameManager.games.filter { nextGame in
+            nextGame.id != game.id &&
+            (nextGame.participantsIDs.contains(gameManager.currentUser?.id ?? "") ||
+             nextGame.creatorID == gameManager.currentUser?.id)
+        }
+        
+        // Sort by: started games first, then by creation date
+        let startedGames = allGames.filter { nextGame in
+            let progress = gameManager.getUserProgress(for: nextGame.id)
+            return progress != nil && progress!.completedWordIndices.count > 0
+        }
+        
+        let notStartedGames = allGames.filter { nextGame in
+            let progress = gameManager.getUserProgress(for: nextGame.id)
+            return progress == nil || progress!.completedWordIndices.count == 0
+        }
+        
+        nextGames = startedGames.sorted { $0.creationDate > $1.creationDate } +
+                    notStartedGames.sorted { $0.creationDate > $1.creationDate }
+    }
+
     
     private func configureAudioSession() {
         do {
@@ -487,6 +672,10 @@ struct GamePlayView: View {
             correctlySpelledWords: correctlySpelledWords,
             score: score
         )
+        
+        if hasUserFinished {
+            checkIfAllPlayersFinished()
+        }
     }
     
     private func findNextUncompletedWord() {
@@ -600,5 +789,60 @@ struct GamePlayView: View {
         let basePoints = 100
         let timePenalty = Int(timeElapsed * 2)
         return max(0, basePoints - timePenalty)
+    }
+}
+
+struct NextGameRow: View {
+    let game: MultiUserGame
+    let gameManager: GameManager
+    
+    var body: some View {
+        NavigationLink(destination: GamePlayView(game: game).environmentObject(gameManager)) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(game.difficultyText)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(difficultyColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                    
+                    Text("by \(gameManager.getCreatorName(for: game) ?? "Unknown")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                if let progress = gameManager.getUserProgress(for: game.id) {
+                    Text("\(progress.completedWordIndices.count)/\(game.wordCount)")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                } else {
+                    Text("Not started")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .padding()
+            .background(Color(.systemGray5))
+            .cornerRadius(10)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var difficultyColor: Color {
+        switch game.difficultyLevel {
+        case 1: return .green
+        case 2: return .orange
+        case 3: return .red
+        default: return .orange
+        }
     }
 }

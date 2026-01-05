@@ -774,6 +774,8 @@ struct ActiveGameContentView: View {
     let isPlaying: Bool
     let isProcessingAnswer: Bool
     let timeElapsed: Double
+    let showDefinition: Bool
+    let definition: String?
     @Binding var userInput: String
     let onPlayWord: () -> Void
     
@@ -796,12 +798,43 @@ struct ActiveGameContentView: View {
                         .font(.caption)
                         .foregroundColor(.orange)
                 }
+                
+                // Definition hint after 5 seconds
+                if showDefinition, let definition = definition {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundColor(.yellow)
+                            Text("Hint")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text(definition)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.yellow.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(15)
         .shadow(radius: 5)
+        .animation(.easeInOut(duration: 0.3), value: showDefinition)
     }
 }
 
@@ -1171,6 +1204,7 @@ struct GamePlayView: View {
     @State private var userInput = ""
     @State private var isPlaying = false
     @State private var timerTask: Task<Void, Never>?
+    @State private var definitionTask: Task<Void, Never>?
     @State private var timeElapsed: Double = 0
     @State private var score = 0
     @State private var showCorrectAnswer = false
@@ -1188,6 +1222,7 @@ struct GamePlayView: View {
     @State private var gameWinner: SpellGameUser? = nil
     @State private var allPlayersFinished = false
     @State private var nextGames: [MultiUserGame] = []
+    @State private var showDefinition = false
     
     // MARK: - Computed Properties
     private var hasUserFinished: Bool {
@@ -1260,6 +1295,8 @@ struct GamePlayView: View {
                         isPlaying: isPlaying,
                         isProcessingAnswer: isProcessingAnswer,
                         timeElapsed: timeElapsed,
+                        showDefinition: showDefinition,
+                        definition: currentWord?.definition,
                         userInput: $userInput,
                         onPlayWord: {
                             Task { await playWord() }
@@ -1343,6 +1380,7 @@ extension GamePlayView {
     
     private func handleViewDisappear() {
         timerTask?.cancel()
+        definitionTask?.cancel()
         Task {
             await saveUserProgress()
         }
@@ -1378,17 +1416,42 @@ extension GamePlayView {
             audioPlayer?.prepareToPlay()
             audioPlayer?.play()
             
-            if timeElapsed == 0 {
-                startTimer()
-            }
-            
+            // Wait for the audio to finish playing
             if let duration = audioPlayer?.duration {
                 try await Task.sleep(for: .seconds(duration))
             }
+            
             isPlaying = false
+            
+            // Start the timer AFTER the word has been fully played
+            if timeElapsed == 0 {
+                startTimer()
+                startDefinitionTimer()
+            }
+            
         } catch {
             print("Error playing audio: \(error)")
             isPlaying = false
+        }
+    }
+    
+    private func startDefinitionTimer() {
+        definitionTask?.cancel()
+        showDefinition = false
+        
+        definitionTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(5))
+                await MainActor.run {
+                    if !isProcessingAnswer && !showCorrectAnswer && !showWrongAnswer {
+                        withAnimation {
+                            showDefinition = true
+                        }
+                    }
+                }
+            } catch {
+                // Task was cancelled
+            }
         }
     }
 }
@@ -1504,10 +1567,12 @@ extension GamePlayView {
     private func moveToNextWord() {
         showCorrectAnswer = false
         showWrongAnswer = false
+        showDefinition = false
         userInput = ""
         timeElapsed = 0
         audioPlayer = nil
         isProcessingAnswer = false
+        definitionTask?.cancel()
         
         findNextUncompletedWord()
     }

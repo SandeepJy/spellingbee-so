@@ -188,6 +188,489 @@ struct CorrectAnswerOverlay: View {
     }
 }
 
+// MARK: - Word Review Data Model
+struct WordReviewData: Identifiable {
+    let id: UUID
+    let word: String
+    let wasCorrect: Bool
+    let userAnswer: String?
+    let definition: String?
+    let exampleSentence: String?
+    let soundURL: URL?
+    
+    init(word: Word, wasCorrect: Bool, userAnswer: String? = nil) {
+        self.id = word.id
+        self.word = word.word
+        self.wasCorrect = wasCorrect
+        self.userAnswer = userAnswer
+        self.soundURL = word.soundURL
+        self.definition = word.definition
+        self.exampleSentence = word.exampleSentence
+    }
+}
+
+// MARK: - Word Detail Sheet
+struct WordDetailSheet: View {
+    let wordData: WordReviewData
+    @Environment(\.dismiss) var dismiss
+    @State private var isPlayingAudio = false
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var isLoadingDetails = false
+    @State private var fetchedDefinition: String?
+    @State private var fetchedExample: String?
+    
+    private var displayDefinition: String {
+        fetchedDefinition ?? wordData.definition ?? "Definition not available"
+    }
+    
+    private var displayExample: String {
+        fetchedExample ?? wordData.exampleSentence ?? "No example sentence available"
+    }
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Word header
+                    VStack(spacing: 12) {
+                        Text(wordData.word)
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(.primary)
+                        
+                        HStack {
+                            Image(systemName: wordData.wasCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(wordData.wasCorrect ? .green : .red)
+                            Text(wordData.wasCorrect ? "Spelled Correctly" : "Spelled Incorrectly")
+                                .font(.subheadline)
+                                .foregroundColor(wordData.wasCorrect ? .green : .red)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(wordData.wasCorrect ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
+                        )
+                        
+                        if !wordData.wasCorrect, let userAnswer = wordData.userAnswer, !userAnswer.isEmpty {
+                            Text("You typed: \"\(userAnswer)\"")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+                    
+                    Divider()
+                    
+                    // Play pronunciation button
+                    Button(action: {
+                        Task {
+                            await playPronunciation()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: isPlayingAudio ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
+                                .symbolEffect(.bounce, value: isPlayingAudio)
+                            Text(isPlayingAudio ? "Playing..." : "Play Pronunciation")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [.blue, .purple]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(12)
+                    }
+                    .disabled(isPlayingAudio || wordData.soundURL == nil)
+                    .opacity(wordData.soundURL == nil ? 0.5 : 1.0)
+                    
+                    // Definition section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Definition", systemImage: "book.fill")
+                            .font(.headline)
+                            .foregroundColor(.blue)
+                        
+                        if isLoadingDetails && wordData.definition == nil {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Loading...")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                        } else {
+                            Text(displayDefinition)
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                        }
+                    }
+                    
+                    // Example sentence section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Example Sentence", systemImage: "text.quote")
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                        
+                        if isLoadingDetails && wordData.exampleSentence == nil {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Loading...")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                        } else {
+                            Text(displayExample)
+                                .font(.body)
+                                .italic()
+                                .foregroundColor(.secondary)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                        }
+                    }
+                    
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal)
+            }
+            .navigationTitle("Word Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await loadWordDetailsIfNeeded()
+            }
+        }
+    }
+    
+    private func loadWordDetailsIfNeeded() async {
+        // Only fetch if we don't have the data
+        guard wordData.definition == nil || wordData.exampleSentence == nil else { return }
+        
+        isLoadingDetails = true
+        
+        if let details = await WordAPIService.shared.fetchSingleWordDetails(word: wordData.word) {
+            fetchedDefinition = details.definition
+            fetchedExample = details.exampleSentence
+        }
+        
+        isLoadingDetails = false
+    }
+    
+    private func playPronunciation() async {
+        guard let soundURL = wordData.soundURL else { return }
+        
+        isPlayingAudio = true
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: soundURL)
+            audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer?.volume = 1.0
+            audioPlayer?.prepareToPlay()
+            audioPlayer?.play()
+            
+            if let duration = audioPlayer?.duration {
+                try await Task.sleep(for: .seconds(duration))
+            }
+        } catch {
+            print("Error playing audio: \(error)")
+        }
+        
+        isPlayingAudio = false
+    }
+}
+
+// MARK: - Word Review Row
+struct WordReviewRow: View {
+    let wordData: WordReviewData
+    let index: Int
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Index number with status color
+                Text("\(index + 1)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(wordData.wasCorrect ? Color.green : Color.red))
+                
+                // Word
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(wordData.word)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    if !wordData.wasCorrect, let userAnswer = wordData.userAnswer, !userAnswer.isEmpty {
+                        Text("You typed: \(userAnswer)")
+                            .font(.caption2)
+                            .foregroundColor(.red.opacity(0.7))
+                    }
+                }
+                
+                Spacer()
+                
+                // Status icon and chevron
+                HStack(spacing: 8) {
+                    Image(systemName: wordData.wasCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(wordData.wasCorrect ? .green : .red)
+                        .font(.title3)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(wordData.wasCorrect ? Color.green.opacity(0.3) : Color.red.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Review Summary Header
+struct ReviewSummaryHeader: View {
+    let correctCount: Int
+    let incorrectCount: Int
+    let totalCount: Int
+    
+    private var accuracyPercentage: Int {
+        guard totalCount > 0 else { return 0 }
+        return Int(Double(correctCount) / Double(totalCount) * 100)
+    }
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Score circles
+            HStack(spacing: 30) {
+                ScoreCircle(value: correctCount, label: "Correct", color: .green)
+                ScoreCircle(value: incorrectCount, label: "Incorrect", color: .red)
+                ScoreCircle(value: totalCount, label: "Total", color: .blue)
+            }
+            
+            // Accuracy bar
+            VStack(spacing: 8) {
+                GeometryReader { geometry in
+                    HStack(spacing: 2) {
+                        if correctCount > 0 {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.green)
+                                .frame(width: geometry.size.width * CGFloat(correctCount) / CGFloat(totalCount))
+                        }
+                        if incorrectCount > 0 {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.red)
+                                .frame(width: geometry.size.width * CGFloat(incorrectCount) / CGFloat(totalCount))
+                        }
+                    }
+                }
+                .frame(height: 10)
+                .background(Color(.systemGray5))
+                .cornerRadius(5)
+                
+                Text("\(accuracyPercentage)% Accuracy")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(16)
+    }
+}
+
+// MARK: - Score Circle
+struct ScoreCircle: View {
+    let value: Int
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("\(value)")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(color)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+// MARK: - Game Review View
+struct GameReviewView: View {
+    let game: MultiUserGame
+    let correctlySpelledWords: [String]
+    let misspelledWords: [MisspelledWord]
+    @Environment(\.dismiss) var dismiss
+    @State private var selectedWord: WordReviewData? = nil
+    @State private var filterOption: ReviewFilterOption = .all
+    
+    enum ReviewFilterOption: String, CaseIterable {
+        case all = "All"
+        case correct = "Correct"
+        case incorrect = "Incorrect"
+    }
+    
+    private var reviewData: [WordReviewData] {
+        game.words.map { word in
+            let wasCorrect = correctlySpelledWords.contains(word.word)
+            let userAnswer = misspelledWords.first { $0.correctWord == word.word }?.userAnswer
+            return WordReviewData(
+                word: word,
+                wasCorrect: wasCorrect,
+                userAnswer: userAnswer
+            )
+        }
+    }
+    
+    private var filteredReviewData: [WordReviewData] {
+        switch filterOption {
+        case .all:
+            return reviewData
+        case .correct:
+            return reviewData.filter { $0.wasCorrect }
+        case .incorrect:
+            return reviewData.filter { !$0.wasCorrect }
+        }
+    }
+    
+    private var correctCount: Int {
+        reviewData.filter { $0.wasCorrect }.count
+    }
+    
+    private var incorrectCount: Int {
+        reviewData.filter { !$0.wasCorrect }.count
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Summary header
+                ReviewSummaryHeader(
+                    correctCount: correctCount,
+                    incorrectCount: incorrectCount,
+                    totalCount: game.wordCount
+                )
+                .padding()
+                
+                // Filter picker
+                Picker("Filter", selection: $filterOption) {
+                    ForEach(ReviewFilterOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                
+                // Word list
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        if filteredReviewData.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: filterOption == .correct ? "checkmark.circle" : "xmark.circle")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.secondary)
+                                Text("No \(filterOption.rawValue.lowercased()) words")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                        } else {
+                            ForEach(Array(filteredReviewData.enumerated()), id: \.element.id) { index, wordData in
+                                WordReviewRow(
+                                    wordData: wordData,
+                                    index: reviewData.firstIndex(where: { $0.id == wordData.id }) ?? index,
+                                    onTap: {
+                                        selectedWord = wordData
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
+                }
+            }
+            .navigationTitle("Review Words")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+            .sheet(item: $selectedWord) { wordData in
+                WordDetailSheet(wordData: wordData)
+            }
+        }
+    }
+}
+
+// MARK: - Review Game Button
+struct ReviewGameButton: View {
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: "list.bullet.clipboard")
+                Text("Review Your Words")
+            }
+            .font(.headline)
+            .foregroundColor(.white)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [.purple, .blue]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(12)
+            .shadow(color: Color.purple.opacity(0.3), radius: 5, x: 0, y: 3)
+        }
+    }
+}
+
 // MARK: - Game Header View
 struct GameHeaderView: View {
     let game: MultiUserGame
@@ -388,6 +871,7 @@ struct PlayerProgressListView: View {
 struct WaitingForPlayersView: View {
     let game: MultiUserGame
     let gameManager: GameManager
+    let onReviewTap: () -> Void
     
     var body: some View {
         VStack(spacing: 20) {
@@ -396,14 +880,17 @@ struct WaitingForPlayersView: View {
                 .foregroundColor(.orange)
                 .symbolEffect(.pulse)
             
-            Text("All words entered!")
+            Text("You've finished!")
                 .font(.title)
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
             
-            Text("Waiting for other players to finish...")
-                .font(.headline)
+            Text("Waiting for other players...")
+                .font(.subheadline)
                 .foregroundColor(.secondary)
+            
+            ReviewGameButton(action: onReviewTap)
+                .padding(.horizontal)
             
             PlayerProgressListView(game: game, gameManager: gameManager)
         }
@@ -463,9 +950,17 @@ struct FinalScoresView: View {
             
             ForEach(scores) { scoreData in
                 HStack {
+                    if scoreData.userID == winnerID {
+                        Image(systemName: "trophy.fill")
+                            .foregroundColor(.yellow)
+                            .font(.caption)
+                    }
+                    
                     Text(scoreData.displayName)
                         .foregroundColor(.primary)
+                    
                     Spacer()
+                    
                     Text("\(scoreData.score) pts")
                         .fontWeight(.bold)
                         .foregroundColor(scoreData.userID == winnerID ? .yellow : .blue)
@@ -482,6 +977,7 @@ struct FinalScoresView: View {
 struct GameCompleteView: View {
     let winner: SpellGameUser?
     let scores: [ScoreData]
+    let onReviewTap: () -> Void
     
     var body: some View {
         VStack(spacing: 20) {
@@ -499,6 +995,8 @@ struct GameCompleteView: View {
             }
             
             FinalScoresView(scores: scores, winnerID: winner?.id)
+            
+            ReviewGameButton(action: onReviewTap)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -608,7 +1106,11 @@ struct FinishedGameContentView: View {
     let gameWinner: SpellGameUser?
     let nextGames: [MultiUserGame]
     let scores: [ScoreData]
+    let correctlySpelledWords: [String]
+    let misspelledWords: [MisspelledWord]
     let onBackToGames: () -> Void
+    
+    @State private var showReviewSheet = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -616,9 +1118,17 @@ struct FinishedGameContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     if !allPlayersFinished {
-                        WaitingForPlayersView(game: game, gameManager: gameManager)
+                        WaitingForPlayersView(
+                            game: game,
+                            gameManager: gameManager,
+                            onReviewTap: { showReviewSheet = true }
+                        )
                     } else {
-                        GameCompleteView(winner: gameWinner, scores: scores)
+                        GameCompleteView(
+                            winner: gameWinner,
+                            scores: scores,
+                            onReviewTap: { showReviewSheet = true }
+                        )
                     }
                     
                     if !nextGames.isEmpty {
@@ -638,6 +1148,13 @@ struct FinishedGameContentView: View {
                     Color(.systemBackground)
                         .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: -2)
                 )
+        }
+        .sheet(isPresented: $showReviewSheet) {
+            GameReviewView(
+                game: game,
+                correctlySpelledWords: correctlySpelledWords,
+                misspelledWords: misspelledWords
+            )
         }
     }
 }
@@ -661,6 +1178,7 @@ struct GamePlayView: View {
     @State private var isCorrect = false
     @State private var completedWordIndices: [Int] = []
     @State private var correctlySpelledWords: [String] = []
+    @State private var misspelledWords: [MisspelledWord] = []
     @State private var audioPlayer: AVAudioPlayer?
     @State private var showStarExplosion = false
     @State private var lastCorrectWord: String = ""
@@ -731,6 +1249,8 @@ struct GamePlayView: View {
                         gameWinner: gameWinner,
                         nextGames: nextGames,
                         scores: sortedScores,
+                        correctlySpelledWords: correctlySpelledWords,
+                        misspelledWords: misspelledWords,
                         onBackToGames: {
                             presentationMode.wrappedValue.dismiss()
                         }
@@ -790,19 +1310,18 @@ struct GamePlayView: View {
         .onAppear(perform: handleViewAppear)
         .onDisappear(perform: handleViewDisappear)
         .task(id: hasUserFinished) {
-                // This task automatically cancels when the view disappears
-                guard hasUserFinished else { return }
+            guard hasUserFinished else { return }
+            
+            while !Task.isCancelled && !allPlayersFinished {
+                checkIfAllPlayersFinished()
                 
-                while !Task.isCancelled && !allPlayersFinished {
-                    checkIfAllPlayersFinished()
-                    
-                    if allPlayersFinished {
-                        break
-                    }
-                    
-                    try? await Task.sleep(for: .seconds(5))
+                if allPlayersFinished {
+                    break
                 }
+                
+                try? await Task.sleep(for: .seconds(5))
             }
+        }
         .animation(.easeInOut(duration: 0.3), value: shouldShowKeyboard)
     }
     
@@ -820,9 +1339,6 @@ extension GamePlayView {
         configureAudioSession()
         loadUserProgress()
         loadNextGames()
-        if hasUserFinished {
-            checkIfAllPlayersFinished()
-        }
     }
     
     private func handleViewDisappear() {
@@ -902,6 +1418,7 @@ extension GamePlayView {
         if let progress = gameManager.getUserProgress(for: game.id) {
             self.completedWordIndices = progress.completedWordIndices
             self.correctlySpelledWords = progress.correctlySpelledWords
+            self.misspelledWords = progress.misspelledWords
             self.score = progress.score
             self.currentWordIndex = progress.currentWordIndex
             
@@ -912,6 +1429,7 @@ extension GamePlayView {
             self.currentWordIndex = 0
             self.completedWordIndices = []
             self.correctlySpelledWords = []
+            self.misspelledWords = []
             self.score = 0
         }
     }
@@ -922,6 +1440,7 @@ extension GamePlayView {
             wordIndex: currentWordIndex,
             completedWordIndices: completedWordIndices,
             correctlySpelledWords: correctlySpelledWords,
+            misspelledWords: misspelledWords,
             score: score
         )
         
@@ -963,6 +1482,15 @@ extension GamePlayView {
             showStarExplosion = true
             showCorrectAnswer = true
         } else {
+            // Add to misspelled words
+            let misspelled = MisspelledWord(
+                correctWord: word.word,
+                userAnswer: userInput,
+                wordIndex: currentWordIndex
+            )
+            if !misspelledWords.contains(where: { $0.correctWord == word.word }) {
+                misspelledWords.append(misspelled)
+            }
             showWrongAnswer = true
         }
         

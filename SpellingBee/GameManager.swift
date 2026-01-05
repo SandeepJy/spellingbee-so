@@ -130,7 +130,7 @@ final class GameManager: ObservableObject {
         
         let wordsData: [WordWithDetails]
         
-        if difficulty == 3 { // Hard difficulty - use Firebase API for words
+        if difficulty == 3 {
             guard let user = Auth.auth().currentUser else {
                 throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
             }
@@ -141,7 +141,7 @@ final class GameManager: ObservableObject {
                 count: wordCount,
                 userToken: token
             )
-        } else { // Easy and Medium difficulty - use public random word API
+        } else {
             let wordLength: Int
             switch difficulty {
             case 1:
@@ -165,6 +165,8 @@ final class GameManager: ObservableObject {
                 word: wordData.word,
                 soundURL: wordData.audioURL != nil ? URL(string: wordData.audioURL!) : nil,
                 level: difficulty,
+                definition: wordData.definition,
+                exampleSentence: wordData.exampleSentence,
                 createdByID: "system",
                 gameID: gameID
             )
@@ -305,6 +307,7 @@ final class GameManager: ObservableObject {
         wordIndex: Int,
         completedWordIndices: [Int],
         correctlySpelledWords: [String],
+        misspelledWords: [MisspelledWord],
         score: Int,
         userID: String? = nil
     ) async -> Bool {
@@ -317,6 +320,7 @@ final class GameManager: ObservableObject {
             userGameProgresses[existingIndex].currentWordIndex = wordIndex
             userGameProgresses[existingIndex].completedWordIndices = completedWordIndices
             userGameProgresses[existingIndex].correctlySpelledWords = correctlySpelledWords
+            userGameProgresses[existingIndex].misspelledWords = misspelledWords
             userGameProgresses[existingIndex].score = score
             userGameProgresses[existingIndex].lastUpdated = Date()
             await saveUserGameProgress(userGameProgresses[existingIndex])
@@ -327,6 +331,7 @@ final class GameManager: ObservableObject {
                 gameID: gameID,
                 completedWordIndices: completedWordIndices,
                 correctlySpelledWords: correctlySpelledWords,
+                misspelledWords: misspelledWords,
                 currentWordIndex: wordIndex,
                 score: score,
                 lastUpdated: Date()
@@ -351,6 +356,7 @@ final class GameManager: ObservableObject {
     private func saveUserGameProgress(_ progress: UserGameProgress) async {
         do {
             try db.collection("userGameProgresses").document(progress.id).setData(from: progress)
+            print("💾 Saved progress for user \(progress.userID) - misspelled: \(progress.misspelledWords.count) words")
         } catch {
             print("Error saving user game progress: \(error)")
         }
@@ -405,12 +411,11 @@ final class GameManager: ObservableObject {
                         let game = try document.data(as: MultiUserGame.self)
                         print("🔔 Real-time update: Game \(game.id)")
                         print("   - has \(game.words.count) words")
-                        print("   - hasGeneratedWords: \(game.hasGeneratedWords)")  // Add this debug line
+                        print("   - hasGeneratedWords: \(game.hasGeneratedWords)")
                         print("   - isStarted: \(game.isStarted)")
                         return game
                     } catch {
                         print("❌ Error decoding game: \(error)")
-                        // Print the raw document data to see what's in Firestore
                         print("   Raw data: \(document.data())")
                         return nil
                     }

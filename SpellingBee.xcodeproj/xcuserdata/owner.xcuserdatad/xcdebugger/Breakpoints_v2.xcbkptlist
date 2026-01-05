@@ -3,4 +3,96 @@
    uuid = "D7F3757C-CA70-47DA-88AE-F24457DEABF5"
    type = "1"
    version = "2.0">
+   <Breakpoints>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "04FBF609-E74A-46DF-9798-E42E15C77447"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "SpellingBee/Views/GamePlayView.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "376"
+            endingLineNumber = "376"
+            landmarkName = "loadWordDetailsIfNeeded()"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "04FBF609-E74A-46DF-9798-E42E15C77447 - 8419ba282907da0a"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(1) suspend resume partial function for SpellingBee.WordDetailSheet.loadWordDetailsIfNeeded() async -&gt; ()"
+                  moduleName = "SpellingBee.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/owner/coding/iOS/SpellingBee-SO/spellingbee-so/SpellingBee/Views/GamePlayView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "376"
+                  endingLineNumber = "376">
+               </Location>
+               <Location
+                  uuid = "04FBF609-E74A-46DF-9798-E42E15C77447 - bdddbc4aad78ec7b"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(2) await resume partial function for SpellingBee.WordDetailSheet.loadWordDetailsIfNeeded() async -&gt; ()"
+                  moduleName = "SpellingBee.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/owner/coding/iOS/SpellingBee-SO/spellingbee-so/SpellingBee/Views/GamePlayView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "376"
+                  endingLineNumber = "376">
+               </Location>
+               <Location
+                  uuid = "04FBF609-E74A-46DF-9798-E42E15C77447 - 59d877f041a41a0c"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for SpellingBee.WordDetailSheet.loadWordDetailsIfNeeded() async -&gt; ()"
+                  moduleName = "SpellingBee.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/owner/coding/iOS/SpellingBee-SO/spellingbee-so/SpellingBee/Views/GamePlayView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "376"
+                  endingLineNumber = "376">
+               </Location>
+               <Location
+                  uuid = "04FBF609-E74A-46DF-9798-E42E15C77447 - 59d877f041a41a0c"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for SpellingBee.WordDetailSheet.loadWordDetailsIfNeeded() async -&gt; ()"
+                  moduleName = "SpellingBee.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/owner/coding/iOS/SpellingBee-SO/spellingbee-so/SpellingBee/Views/GamePlayView.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "376"
+                  endingLineNumber = "376">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "00F39970-EC2D-411B-AEC4-F3FE297E7D1B"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "SpellingBee/Views/GamePlayView.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "372"
+            endingLineNumber = "372"
+            landmarkName = "loadWordDetailsIfNeeded()"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+   </Breakpoints>
 </Bucket>

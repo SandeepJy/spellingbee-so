@@ -33,6 +33,7 @@ struct WordWithDetails: Sendable {
     let word: String
     let audioURL: String?
     let definition: String?
+    let exampleSentence: String?
 }
 
 /// Response structure for the Firebase hard words API
@@ -43,7 +44,6 @@ struct HardWordsResponse: Codable, Sendable {
 actor WordAPIService {
     static let shared = WordAPIService()
     
-    // TODO: Replace with your actual Firebase API endpoint
     private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getRandomWords"
     
     private init() {}
@@ -128,6 +128,45 @@ actor WordAPIService {
         }
     }
     
+    /// Extracts the best audio URL from phonetics array
+    private func extractAudioURL(from phonetics: [Phonetic]) -> String? {
+        // Find first phonetic with a non-empty audio URL
+        return phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
+    }
+    
+    /// Extracts the first definition from meanings
+    private func extractDefinition(from meanings: [Meaning]) -> String? {
+        // Get the first definition from the first meaning
+        return meanings.first?.definitions.first?.definition
+    }
+    
+    /// Extracts the first example sentence from meanings
+    private func extractExampleSentence(from meanings: [Meaning]) -> String? {
+        // Search through all meanings and definitions to find the first example
+        for meaning in meanings {
+            for definition in meaning.definitions {
+                if let example = definition.example, !example.isEmpty {
+                    return example
+                }
+            }
+        }
+        return nil
+    }
+    
+    /// Parses DictionaryResponse into WordWithDetails
+    private func parseWordDetails(from response: DictionaryResponse) async -> WordWithDetails {
+        let audioURL = extractAudioURL(from: response.phonetics)
+        let definition = extractDefinition(from: response.meanings)
+        let exampleSentence = extractExampleSentence(from: response.meanings)
+        
+        return WordWithDetails(
+            word: response.word,
+            audioURL: audioURL,
+            definition: definition,
+            exampleSentence: exampleSentence
+        )
+    }
+    
     /// Fetches random words with their details and audio URLs (for easy/medium difficulty)
     func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5) async throws -> [WordWithDetails] {
         let requestCount = count * 3
@@ -142,7 +181,7 @@ actor WordAPIService {
     
     /// Fetches hard words with their details and audio URLs (for hard difficulty)
     func fetchHardWordsWithDetails(count: Int, userToken: String) async throws -> [WordWithDetails] {
-        let requestCount = count // Request extra in case some don't have audio
+        let requestCount = count
         
         print("🔥 Requesting \(requestCount) hard words from Firebase API to get \(count) with audio...")
         
@@ -161,11 +200,11 @@ actor WordAPIService {
                 group.addTask {
                     do {
                         let details = try await self.fetchWordDetails(word: word)
-                        let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
-                        let definition = details.meanings.first?.definitions.first?.definition
+                        let wordWithDetails =  await self.parseWordDetails(from: details)
                         
-                        if audioURL != nil {
-                            return WordWithDetails(word: word, audioURL: audioURL, definition: definition)
+                        // Only include words that have audio
+                        if wordWithDetails.audioURL != nil {
+                            return wordWithDetails
                         }
                         return nil
                     } catch {
@@ -195,8 +234,19 @@ actor WordAPIService {
         }
         
         print("🎉 Successfully returning \(finalWords.count) words:")
-        finalWords.forEach { print("   - \($0.word)") }
+        finalWords.forEach { print("   - \($0.word): \($0.definition?.prefix(50) ?? "No definition")...") }
         
         return finalWords
+    }
+    
+    /// Fetches details for a single word (used for review screen)
+    func fetchSingleWordDetails(word: String) async -> WordWithDetails? {
+        do {
+            let details = try await fetchWordDetails(word: word)
+            return await parseWordDetails(from: details)
+        } catch {
+            print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+            return nil
+        }
     }
 }

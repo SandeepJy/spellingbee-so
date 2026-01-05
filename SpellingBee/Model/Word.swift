@@ -5,14 +5,27 @@ struct Word: Identifiable, Codable, Hashable, Sendable {
     let word: String
     let soundURL: URL?
     let level: Int
+    let definition: String?
+    let exampleSentence: String?
     var createdByID: String
     var gameID: UUID?
     
-    init(id: UUID = UUID(), word: String, soundURL: URL?, level: Int, createdByID: String, gameID: UUID? = nil) {
+    init(
+        id: UUID = UUID(),
+        word: String,
+        soundURL: URL?,
+        level: Int,
+        definition: String? = nil,
+        exampleSentence: String? = nil,
+        createdByID: String,
+        gameID: UUID? = nil
+    ) {
         self.id = id
         self.word = word
         self.soundURL = soundURL
         self.level = level
+        self.definition = definition
+        self.exampleSentence = exampleSentence
         self.createdByID = createdByID
         self.gameID = gameID
     }

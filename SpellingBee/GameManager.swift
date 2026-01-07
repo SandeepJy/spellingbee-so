@@ -21,12 +21,14 @@ final class GameManager: ObservableObject {
     private var progressListener: ListenerRegistration?
     private var usersListener: ListenerRegistration?
     
+    // Track game IDs being created to prevent listener conflicts
+    private var gameIDsBeingCreated: Set<UUID> = []
+    
     init() {}
     
     func setUserManager(_ userManager: UserManager) {
         self.userManager = userManager
         
-        // Observe auth changes
         Task {
             for await _ in userManager.$isAuthenticated.values {
                 await handleAuthChange(userManager: userManager)
@@ -69,6 +71,7 @@ final class GameManager: ObservableObject {
         userGameProgresses = []
         currentUser = nil
         isDataLoaded = false
+        gameIDsBeingCreated = []
         
         gamesListener?.remove()
         progressListener?.remove()
@@ -94,40 +97,30 @@ final class GameManager: ObservableObject {
         await saveUser(newUser)
     }
     
-    func createGame(creatorID: String, participantsIDs: Set<String>, difficulty: Int = 2, wordCount: Int = 10) async -> UUID? {
-        guard userManager?.isAuthenticated == true else {
-            print("Cannot create game: Not authenticated")
-            return nil
-        }
-        
-        let newGame = MultiUserGame(
-            id: UUID(),
-            creatorID: creatorID,
-            participantsIDs: participantsIDs,
-            words: [],
-            isStarted: false,
-            hasGeneratedWords: false,
-            difficultyLevel: difficulty,
-            wordCount: wordCount,
-            creationDate: Date()
-        )
-        
-        games.append(newGame)
-        await saveGame(newGame)
-        return newGame.id
-    }
-    
-    func generateWordsForGame(gameID: UUID, wordCount: Int, difficulty: Int) async throws -> [Word] {
+    // Combined game creation and word generation
+    func createGameWithWords(
+        creatorID: String,
+        participantsIDs: Set<String>,
+        difficulty: Int = 2,
+        wordCount: Int = 10
+    ) async throws -> UUID {
         guard userManager?.isAuthenticated == true else {
             throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
         }
         
-        guard let gameIndex = games.firstIndex(where: { $0.id == gameID }) else {
-            throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
+        let gameID = UUID()
+        
+        // Mark this game as being created to prevent listener conflicts
+        gameIDsBeingCreated.insert(gameID)
+        
+        // Ensure we remove from set when done
+        defer {
+            gameIDsBeingCreated.remove(gameID)
         }
         
-        print("🎲 Generating \(wordCount) words for game with difficulty: \(difficulty)...")
+        print("🎮 Creating game \(gameID) with difficulty: \(difficulty), word count: \(wordCount)")
         
+        // Generate words first before creating game
         let wordsData: [WordWithDetails]
         
         if difficulty == 3 {
@@ -158,7 +151,7 @@ final class GameManager: ObservableObject {
             )
         }
         
-        print("✅ Successfully fetched \(wordsData.count) words from API")
+        print("✅ Successfully fetched \(wordsData.count) words from API for game \(gameID)")
         
         let words = wordsData.map { wordData in
             Word(
@@ -172,18 +165,36 @@ final class GameManager: ObservableObject {
             )
         }
         
-        print("📝 Created \(words.count) Word objects")
+        print("📝 Created \(words.count) Word objects for game \(gameID)")
         print("   Words: \(words.map { $0.word })")
         
-        games[gameIndex].words = words
-        games[gameIndex].hasGeneratedWords = true
-        games[gameIndex].isStarted = true
+        // Create the complete game with words
+        let newGame = MultiUserGame(
+            id: gameID,
+            creatorID: creatorID,
+            participantsIDs: participantsIDs,
+            words: words,
+            isStarted: true,
+            hasGeneratedWords: true,
+            difficultyLevel: difficulty,
+            wordCount: wordCount,
+            creationDate: Date()
+        )
         
-        await saveGame(games[gameIndex])
+        // Add to local array
+        games.append(newGame)
         
-        print("💾 Game saved with \(games[gameIndex].words.count) words")
+        // Save to Firestore
+        do {
+            try db.collection("games").document(gameID.uuidString).setData(from: newGame)
+            print("💾 Successfully saved game \(gameID) to Firestore with \(newGame.words.count) words")
+        } catch {
+            // Remove from local array if save fails
+            games.removeAll { $0.id == gameID }
+            throw error
+        }
         
-        return words
+        return gameID
     }
     
     func getCorrectWordCount(for gameID: UUID, userID: String? = nil) -> Int {
@@ -406,22 +417,46 @@ final class GameManager: ObservableObject {
             }
             
             Task { @MainActor [weak self] in
-                let newGames = documents.compactMap { document -> MultiUserGame? in
+                guard let self = self else { return }
+                
+                var updatedGames: [MultiUserGame] = []
+                
+                for document in documents {
                     do {
                         let game = try document.data(as: MultiUserGame.self)
+                        
+                        // Skip games that are currently being created locally
+                        if self.gameIDsBeingCreated.contains(game.id) {
+                            print("⏭️ Skipping real-time update for game \(game.id) - currently being created")
+                            // Keep the local version
+                            if let localGame = self.games.first(where: { $0.id == game.id }) {
+                                updatedGames.append(localGame)
+                            }
+                            continue
+                        }
+                        
                         print("🔔 Real-time update: Game \(game.id)")
                         print("   - has \(game.words.count) words")
                         print("   - hasGeneratedWords: \(game.hasGeneratedWords)")
                         print("   - isStarted: \(game.isStarted)")
-                        return game
+                        
+                        updatedGames.append(game)
                     } catch {
                         print("❌ Error decoding game: \(error)")
                         print("   Raw data: \(document.data())")
-                        return nil
                     }
                 }
-                self?.games = newGames
-                print("🔔 Games updated via listener: \(newGames.count) total")
+                
+                // Also preserve any local games being created that haven't been saved yet
+                for gameID in self.gameIDsBeingCreated {
+                    if !updatedGames.contains(where: { $0.id == gameID }),
+                       let localGame = self.games.first(where: { $0.id == gameID }) {
+                        updatedGames.append(localGame)
+                    }
+                }
+                
+                self.games = updatedGames
+                print("🔔 Games updated via listener: \(updatedGames.count) total")
             }
         }
         

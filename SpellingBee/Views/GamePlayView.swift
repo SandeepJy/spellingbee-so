@@ -801,7 +801,7 @@ struct ActiveGameContentView: View {
                 
                 // Definition hint after 5 seconds
                 if showDefinition, let definition = definition {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 4) {
                         HStack {
                             Image(systemName: "lightbulb.fill")
                                 .foregroundColor(.yellow)

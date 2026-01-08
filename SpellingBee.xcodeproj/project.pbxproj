@@ -26,6 +26,14 @@
 		EB5FC8822EE49B6300B1718E /* DictionaryResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */; };
 		EB5FC8862EE49BD600B1718E /* WordApiService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5FC8852EE49BCF00B1718E /* WordApiService.swift */; };
 		EB64260E2F09A34E002E3247 /* CustomKeywordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB64260D2F09A347002E3247 /* CustomKeywordView.swift */; };
+		EB64262C2F101936002E3247 /* SoloProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB64262B2F101933002E3247 /* SoloProgress.swift */; };
+		EB64262E2F101955002E3247 /* SoloSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB64262D2F101952002E3247 /* SoloSession.swift */; };
+		EB6426302F101977002E3247 /* SoloModeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB64262F2F101972002E3247 /* SoloModeManager.swift */; };
+		EB6426332F1019B3002E3247 /* SoloModeMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6426322F1019AF002E3247 /* SoloModeMenuView.swift */; };
+		EB689BD12F1028140088A19F /* AchievementNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB689BD02F10280D0088A19F /* AchievementNotificationView.swift */; };
+		EB689BD52F1028BE0088A19F /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB689BD42F1028BE0088A19F /* StatisticsView.swift */; };
+		EB689BD62F1028BE0088A19F /* SoloSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB689BD32F1028BE0088A19F /* SoloSessionView.swift */; };
+		EB689BD92F106AF70088A19F /* AchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB689BD82F106AEE0088A19F /* AchievementsView.swift */; };
 		EB70CDA42DAB429800C2F52E /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = EB70CDA32DAB429800C2F52E /* FirebaseCore */; };
 		EB70CDA62DAB431400C2F52E /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB70CDA52DAB431400C2F52E /* UserManager.swift */; };
 		EB70CDA82DAB435E00C2F52E /* SpellGameUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB70CDA72DAB435E00C2F52E /* SpellGameUser.swift */; };
@@ -65,6 +73,14 @@
 		EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryResponse.swift; sourceTree = "<group>"; };
 		EB5FC8852EE49BCF00B1718E /* WordApiService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordApiService.swift; sourceTree = "<group>"; };
 		EB64260D2F09A347002E3247 /* CustomKeywordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomKeywordView.swift; sourceTree = "<group>"; };
+		EB64262B2F101933002E3247 /* SoloProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloProgress.swift; sourceTree = "<group>"; };
+		EB64262D2F101952002E3247 /* SoloSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloSession.swift; sourceTree = "<group>"; };
+		EB64262F2F101972002E3247 /* SoloModeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloModeManager.swift; sourceTree = "<group>"; };
+		EB6426322F1019AF002E3247 /* SoloModeMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloModeMenuView.swift; sourceTree = "<group>"; };
+		EB689BD02F10280D0088A19F /* AchievementNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementNotificationView.swift; sourceTree = "<group>"; };
+		EB689BD32F1028BE0088A19F /* SoloSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloSessionView.swift; sourceTree = "<group>"; };
+		EB689BD42F1028BE0088A19F /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		EB689BD82F106AEE0088A19F /* AchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementsView.swift; sourceTree = "<group>"; };
 		EB70CDA52DAB431400C2F52E /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		EB70CDA72DAB435E00C2F52E /* SpellGameUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpellGameUser.swift; sourceTree = "<group>"; };
 		EB70CDAA2DAB43A200C2F52E /* LoginRegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginRegisterView.swift; sourceTree = "<group>"; };
@@ -122,6 +138,7 @@
 		EB16AE962C5DB5E50017F738 /* SpellingBee */ = {
 			isa = PBXGroup;
 			children = (
+				EB64262F2F101972002E3247 /* SoloModeManager.swift */,
 				EB5FC8842EE49BC400B1718E /* Service */,
 				EB70CDA92DAB438300C2F52E /* Views */,
 				EB16AEA62C5DB5FC0017F738 /* Model */,
@@ -149,6 +166,8 @@
 		EB16AEA62C5DB5FC0017F738 /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				EB64262D2F101952002E3247 /* SoloSession.swift */,
+				EB64262B2F101933002E3247 /* SoloProgress.swift */,
 				EB3A8D9E2DED3E34007D469B /* UserGameProgress.swift */,
 				EB5FC8812EE49B5D00B1718E /* DictionaryResponse.swift */,
 				EB5FC87F2EE49B3700B1718E /* RandomWordResponse.swift */,
@@ -168,6 +187,18 @@
 			path = Service;
 			sourceTree = "<group>";
 		};
+		EB6426312F101993002E3247 /* SoloMode */ = {
+			isa = PBXGroup;
+			children = (
+				EB689BD82F106AEE0088A19F /* AchievementsView.swift */,
+				EB689BD32F1028BE0088A19F /* SoloSessionView.swift */,
+				EB689BD42F1028BE0088A19F /* StatisticsView.swift */,
+				EB689BD02F10280D0088A19F /* AchievementNotificationView.swift */,
+				EB6426322F1019AF002E3247 /* SoloModeMenuView.swift */,
+			);
+			path = SoloMode;
+			sourceTree = "<group>";
+		};
 		EB70CDA22DAB429800C2F52E /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -178,6 +209,7 @@
 		EB70CDA92DAB438300C2F52E /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				EB6426312F101993002E3247 /* SoloMode */,
 				EB64260D2F09A347002E3247 /* CustomKeywordView.swift */,
 				EB2E55D92DD61EA900B8DCA5 /* CommViews.swift */,
 				EB5C412A2DCAE59C00D1CE9D /* GamePlayView.swift */,
@@ -297,21 +329,29 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EB6426302F101977002E3247 /* SoloModeManager.swift in Sources */,
 				EB5C41292DCAE52400D1CE9D /* CreateGameView.swift in Sources */,
+				EB64262E2F101955002E3247 /* SoloSession.swift in Sources */,
 				EB5C412B2DCAE59F00D1CE9D /* GamePlayView.swift in Sources */,
 				EB2E55DA2DD61EAE00B8DCA5 /* CommViews.swift in Sources */,
+				EB6426332F1019B3002E3247 /* SoloModeMenuView.swift in Sources */,
 				EB5FC8862EE49BD600B1718E /* WordApiService.swift in Sources */,
 				EB16AE9A2C5DB5E50017F738 /* ContentView.swift in Sources */,
 				EB225D312DAC9CED00BE66B9 /* VoiceViewModel.swift in Sources */,
 				EB70CDAB2DAB43A200C2F52E /* LoginRegisterView.swift in Sources */,
 				EB5FC8802EE49B3C00B1718E /* RandomWordResponse.swift in Sources */,
+				EB689BD52F1028BE0088A19F /* StatisticsView.swift in Sources */,
+				EB689BD62F1028BE0088A19F /* SoloSessionView.swift in Sources */,
 				EB16AE982C5DB5E50017F738 /* SpellingBeeApp.swift in Sources */,
 				EB5C41272DCAE4E500D1CE9D /* Word.swift in Sources */,
 				EB225D252DAB472600BE66B9 /* GameManager.swift in Sources */,
+				EB689BD12F1028140088A19F /* AchievementNotificationView.swift in Sources */,
 				EB70CDA62DAB431400C2F52E /* UserManager.swift in Sources */,
 				EB5C41252DCAE4BE00D1CE9D /* MultiUserGame.swift in Sources */,
 				EB70CDA82DAB435E00C2F52E /* SpellGameUser.swift in Sources */,
+				EB64262C2F101936002E3247 /* SoloProgress.swift in Sources */,
 				EBCF9D192DD6D8E900AC45DE /* SpellGameUser+DisplayName.swift in Sources */,
+				EB689BD92F106AF70088A19F /* AchievementsView.swift in Sources */,
 				EB5FC8822EE49B6300B1718E /* DictionaryResponse.swift in Sources */,
 				EB3A8D9F2DED3E3A007D469B /* UserGameProgress.swift in Sources */,
 				EB64260E2F09A34E002E3247 /* CustomKeywordView.swift in Sources */,

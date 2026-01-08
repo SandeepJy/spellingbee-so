@@ -270,7 +270,7 @@ struct WordDetailSheet: View {
                     }) {
                         HStack {
                             Image(systemName: isPlayingAudio ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
-                                .symbolEffect(.bounce, value: isPlayingAudio)
+                                //.symbolEffect(.bounce, value: isPlayingAudio)
                             Text(isPlayingAudio ? "Playing..." : "Play Pronunciation")
                         }
                         .font(.headline)
@@ -742,7 +742,7 @@ struct WordPlaybackButton: View {
                 Image(systemName: isPlaying ? "speaker.wave.3.fill" : "play.circle.fill")
                     .font(.system(size: 50))
                     .foregroundColor(.white)
-                    .symbolEffect(.bounce, value: isPlaying)
+                    //.symbolEffect(.bounce, value: isPlaying)
                 
                 Text(isPlaying ? "Playing..." : "Tap to hear word")
                     .font(.caption)
@@ -911,7 +911,7 @@ struct WaitingForPlayersView: View {
             Image(systemName: "hourglass")
                 .font(.system(size: 60))
                 .foregroundColor(.orange)
-                .symbolEffect(.pulse)
+                //.symbolEffect(.pulse)
             
             Text("You've finished!")
                 .font(.title)

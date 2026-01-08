@@ -83,6 +83,38 @@ struct MainView: View {
                         }
                         .padding(.horizontal)
                         
+                        NavigationLink(destination: SoloModeMenuView()
+                            .environmentObject(SoloModeManager())
+                            .environmentObject(gameManager)
+                        ) {
+                            HStack {
+                                Image(systemName: "person.fill")
+                                    .font(.title2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Solo Practice")
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                    Text("Practice at your own pace")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.9))
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [.purple, .blue]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(15)
+                            .shadow(radius: 5)
+                        }
+                        .padding(.horizontal)
+                        
                         let userGames = gameManager.games.filter {
                             $0.creatorID == gameManager.currentUser?.id ||
                             $0.participantsIDs.contains(gameManager.currentUser?.id ?? "")

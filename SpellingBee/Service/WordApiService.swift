@@ -44,7 +44,7 @@ struct HardWordsResponse: Codable, Sendable {
 actor WordAPIService {
     static let shared = WordAPIService()
     
-    private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getRandomWords"
+    private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getWordsByLevel"
     
     private init() {}
     
@@ -69,7 +69,7 @@ actor WordAPIService {
     
     /// Fetches hard difficulty words from Firebase API (requires authentication)
     func fetchHardWords(count: Int, userToken: String) async throws -> [String] {
-        let urlString = "\(hardWordsAPIEndpoint)?count=\(count)"
+        let urlString = "\(hardWordsAPIEndpoint)?level=8&count=\(count)"
         
         guard let url = URL(string: urlString) else {
             throw WordAPIError.invalidURL

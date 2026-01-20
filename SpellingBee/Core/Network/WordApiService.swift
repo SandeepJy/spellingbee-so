@@ -250,3 +250,73 @@ actor WordAPIService {
         }
     }
 }
+
+// Add to WordAPIService
+extension WordAPIService {
+    /// Fetch words for solo mode based on level
+    func fetchWordsForSoloMode(level: Int, count: Int = 10, userToken: String? = nil) async throws -> [WordWithDetails] {
+        if level <= 10 {
+            // Levels 1-10: Use word length for difficulty
+            let wordLength = calculateWordLengthForLevel(level)
+            return try await fetchRandomWordsWithDetails(count: count, length: wordLength)
+        } else {
+            // Levels 11+: Use Firebase curated hard words
+            guard let token = userToken else {
+                throw WordAPIError.authenticationRequired
+            }
+            
+            // Map level to Firebase difficulty (11+ maps to increasingly harder words)
+            let firebaseLevel = min(level - 8, 10) // Level 11 = 3, Level 12 = 4, etc.
+            return try await fetchHardWordsWithDetails(count: count, userToken: token, level: firebaseLevel)
+        }
+    }
+    
+    private func calculateWordLengthForLevel(_ level: Int) -> Int {
+        switch level {
+        case 1...2: return 3
+        case 3...4: return 4
+        case 5...6: return 5
+        case 7...8: return 6
+        case 9...10: return 7
+        default: return 8
+        }
+    }
+    
+    /// Modified to support custom difficulty level for Firebase
+    func fetchHardWordsWithDetails(count: Int, userToken: String, level: Int = 8) async throws -> [WordWithDetails] {
+        let urlString = "\(hardWordsAPIEndpoint)?level=\(level)&count=\(count)"
+        
+        guard let url = URL(string: urlString) else {
+            throw WordAPIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(userToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        print("🔥 Fetching hard words from Firebase API with level: \(level)...")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WordAPIError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            print("❌ Firebase API returned status code: \(httpResponse.statusCode)")
+            throw WordAPIError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+        
+        do {
+            let hardWordsResponse = try JSONDecoder().decode(HardWordsResponse.self, from: data)
+            print("✅ Received \(hardWordsResponse.words.count) hard words from Firebase")
+            
+            let words = hardWordsResponse.words
+            return try await fetchDetailsForWords(words: words, targetCount: count)
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
+    }
+}

@@ -87,28 +87,3 @@ struct SessionStats: Codable, Hashable, Sendable {
         }
     }
 }
-
-enum HintType: String, Codable, Sendable {
-    case wordLength = "Word Length"
-    case firstLetter = "First Letter"
-    case definition = "Enhanced Definition"
-    case example = "Example Sentence"
-    
-    var cost: Int {
-        switch self {
-        case .wordLength: return 0 // Free
-        case .firstLetter: return 1
-        case .definition: return 1
-        case .example: return 1
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .wordLength: return "ruler"
-        case .firstLetter: return "a.circle.fill"
-        case .definition: return "book.fill"
-        case .example: return "text.quote"
-        }
-    }
-}

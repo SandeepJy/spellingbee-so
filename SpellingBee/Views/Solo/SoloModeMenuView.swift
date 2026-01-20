@@ -452,28 +452,3 @@ struct MenuActionButton: View {
         }
     }
 }
-
-// MARK: - Loading Overlay
-struct LoadingOverlay: View {
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .edgesIgnoringSafeArea(.all)
-            
-            VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                
-                Text("Preparing your session...")
-                    .foregroundColor(.white)
-                    .font(.headline)
-            }
-            .padding(30)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(.systemGray6))
-            )
-        }
-    }
-}

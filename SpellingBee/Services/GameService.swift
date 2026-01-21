@@ -3,7 +3,6 @@ import Firebase
 import FirebaseFirestore
 import FirebaseAuth
 
-/// Service responsible for game-related Firebase operations
 struct GameService: Sendable {
     
     // MARK: - Game Operations
@@ -27,24 +26,20 @@ struct GameService: Sendable {
     ) async throws -> MultiUserGame {
         let gameID = UUID()
         
-        let wordsData: [WordWithDetails]
-        
+        // Get user token for hard difficulty
+        var userToken: String?
         if difficulty == 3 {
             guard let user = Auth.auth().currentUser else {
                 throw GameServiceError.notAuthenticated
             }
-            let token = try await user.getIDToken()
-            wordsData = try await WordAPIService.shared.fetchHardWordsWithDetails(
-                count: wordCount,
-                userToken: token
-            )
-        } else {
-            let wordLength = difficulty == 1 ? Int.random(in: 3...4) : 5
-            wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(
-                count: wordCount,
-                length: wordLength
-            )
+            userToken = try await user.getIDToken()
         }
+        
+        let wordsData = try await WordAPIService.shared.fetchWordsForMultiplayer(
+            difficulty: difficulty,
+            count: wordCount,
+            userToken: userToken
+        )
         
         let words = wordsData.map { wordData in
             Word(
@@ -97,7 +92,6 @@ struct GameService: Sendable {
                 print("Error fetching games: \(error?.localizedDescription ?? "Unknown")")
                 return
             }
-            
             let games = documents.compactMap { document in
                 try? document.data(as: MultiUserGame.self)
             }
@@ -113,7 +107,6 @@ struct GameService: Sendable {
                 print("Error fetching progress: \(error?.localizedDescription ?? "Unknown")")
                 return
             }
-            
             let progresses = documents.compactMap { document in
                 try? document.data(as: UserGameProgress.self)
             }

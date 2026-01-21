@@ -9,7 +9,9 @@ final class SoloModeManager: ObservableObject {
     @Published var soloProgress: SoloProgress?
     @Published var currentSession: SoloSession?
     @Published var isLoading = false
+    @Published var loadingMessage = "Loading..."
     @Published var unlockedAchievements: [Achievement] = []
+    @Published var errorMessage: String?
     
     private let soloService = SoloModeService()
     private var progressListener: ListenerRegistration?
@@ -43,7 +45,6 @@ final class SoloModeManager: ObservableObject {
     
     private func saveProgress() async {
         guard let progress = soloProgress else { return }
-        
         do {
             try soloService.saveSoloProgress(progress)
         } catch {
@@ -53,35 +54,40 @@ final class SoloModeManager: ObservableObject {
     
     // MARK: - Session Management
     
-    func createSession(userID: String, level: Int, wordCount: Int = 10) async throws -> SoloSession {
+    func createSession(userID: String, level: Int) async throws -> SoloSession {
         guard soloProgress != nil else {
             throw NSError(domain: "", code: 404, userInfo: [NSLocalizedDescriptionKey: "Progress not loaded"])
         }
         
         isLoading = true
+        loadingMessage = "Preparing Level \(level)..."
+        errorMessage = nil
         defer { isLoading = false }
         
-        var session = SoloSession(userID: userID, level: level, wordCount: wordCount)
+        let config = SoloLevelConfig.config(for: level)
         
-        let wordsData: [WordWithDetails]
+        var session = SoloSession(
+            userID: userID,
+            level: level,
+            requiredStreak: config.requiredStreak,
+            timeLimit: config.timeLimit
+        )
         
-        if level <= 10 {
-            let wordLength = SoloSession.calculateDifficulty(for: level)
-            wordsData = try await WordAPIService.shared.fetchRandomWordsWithDetails(
-                count: wordCount,
-                length: wordLength
-            )
-        } else {
+        // Get user token for Firebase API
+        var userToken: String?
+        if case .firebaseAPI = config.wordSource {
             guard let user = Auth.auth().currentUser else {
                 throw NSError(domain: "", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
             }
-            
-            let token = try await user.getIDToken()
-            wordsData = try await WordAPIService.shared.fetchHardWordsWithDetails(
-                count: wordCount,
-                userToken: token
-            )
+            userToken = try await user.getIDToken()
         }
+        
+        loadingMessage = "Fetching words..."
+        
+        let wordsData = try await WordAPIService.shared.fetchWordsForSoloLevel(
+            config: config,
+            userToken: userToken
+        )
         
         session.words = wordsData.map { wordData in
             Word(
@@ -101,7 +107,6 @@ final class SoloModeManager: ObservableObject {
     
     func updateSession(_ session: SoloSession) async {
         currentSession = session
-        
         do {
             try soloService.saveSession(session)
         } catch {
@@ -109,60 +114,87 @@ final class SoloModeManager: ObservableObject {
         }
     }
     
+    func recordCorrectWord(word: String) async {
+        guard var session = currentSession else { return }
+        
+        session.currentStreak += 1
+        session.correctWords.append(word)
+        session.totalWordsAttempted += 1
+        session.currentWordIndex += 1
+        
+        if session.currentStreak >= session.requiredStreak {
+            session.isCompleted = true
+            session.endDate = Date()
+        }
+        
+        currentSession = session
+        await updateSession(session)
+    }
+    
+    func recordIncorrectWord(correctWord: String, userAnswer: String) async {
+        guard var session = currentSession else { return }
+        
+        let misspelled = MisspelledWord(
+            correctWord: correctWord,
+            userAnswer: userAnswer,
+            wordIndex: session.currentWordIndex
+        )
+        session.misspelledWords.append(misspelled)
+        session.currentStreak = 0 // Reset streak
+        session.totalWordsAttempted += 1
+        session.currentWordIndex += 1
+        
+        currentSession = session
+        await updateSession(session)
+    }
+    
+    func recordTimeout(correctWord: String) async {
+        await recordIncorrectWord(correctWord: correctWord, userAnswer: "(timed out)")
+    }
+    
     func completeSession() async {
         guard var session = currentSession, var progress = soloProgress else { return }
         
         session.endDate = Date()
+        session.isCompleted = true
         
         // Update progress stats
-        progress.totalWordsSpelled += session.wordCount
+        progress.totalWordsSpelled += session.totalWordsAttempted
         progress.totalCorrectWords += session.correctWords.count
         progress.totalIncorrectWords += session.misspelledWords.count
         progress.totalHintsUsed += session.hintsUsed
         
-        // Recalculate average accuracy
         if progress.totalWordsSpelled > 0 {
             progress.averageAccuracy = Double(progress.totalCorrectWords) / Double(progress.totalWordsSpelled) * 100
+        }
+        
+        // Level up if completed
+        if session.isLevelComplete && session.level >= progress.level {
+            progress.level = min(session.level + 1, 20)
         }
         
         // Award XP
         let xpEarned = calculateSessionXP(session: session)
         session.totalXPEarned = xpEarned
-        await addXP(xpEarned)
+        progress.xp += xpEarned
         
-        // Update level history
-        updateLevelHistory(session: session)
+        // Level up XP
+        while progress.xp >= progress.xpToNextLevel {
+            progress.xp -= progress.xpToNextLevel
+            progress.xpToNextLevel = calculateXPForNextLevel(progress.level)
+        }
+        
+        // Update session and progress
+        currentSession = session
+        soloProgress = progress
+        await updateSession(session)
+        await saveProgress()
         
         // Check achievements
         await checkAchievements(session: session)
-        
-        // Update session
-        currentSession = session
-        await updateSession(session)
-        
-        // Save progress
-        soloProgress = progress
-        await saveProgress()
     }
     
-    // MARK: - XP and Leveling
-    
-    func addXP(_ amount: Int) async {
-        guard var progress = soloProgress else { return }
-        
-        progress.xp += amount
-        
-        while progress.xp >= progress.xpToNextLevel {
-            progress.xp -= progress.xpToNextLevel
-            progress.level += 1
-            progress.xpToNextLevel = calculateXPForNextLevel(progress.level)
-            
-            await checkLevelAchievement(level: progress.level)
-        }
-        
-        soloProgress = progress
-        await saveProgress()
-    }
+    // MARK: - XP Calculations
     
     private func calculateXPForNextLevel(_ level: Int) -> Int {
         return Int(100 * pow(1.2, Double(level - 1)))
@@ -171,25 +203,31 @@ final class SoloModeManager: ObservableObject {
     private func calculateSessionXP(session: SoloSession) -> Int {
         var xp = 0
         
+        // Base XP per correct word
         xp += session.correctWords.count * 10
         
-        if session.accuracy >= 100 {
+        // Completion bonus
+        if session.isLevelComplete {
             xp += 50
-        } else if session.accuracy >= 90 {
-            xp += 30
-        } else if session.accuracy >= 80 {
-            xp += 15
+            
+            // Perfect run bonus (no mistakes at all)
+            if session.misspelledWords.isEmpty {
+                xp += 30
+            }
         }
         
-        if session.hintsUsed == 0 {
+        // No hints bonus
+        if session.hintsUsed == 0 && session.correctWords.count >= 3 {
             xp += 20
         }
         
-        if session.sessionStats.longestPerfectStreak >= 5 {
-            xp += session.sessionStats.longestPerfectStreak * 2
+        // Speed bonus
+        if session.sessionStats.averageWordTime < 3.0 && session.correctWords.count >= 3 {
+            xp += 15
         }
         
-        xp = Int(Double(xp) * (1.0 + Double(session.level) * 0.1))
+        // Level multiplier
+        xp = Int(Double(xp) * (1.0 + Double(session.level) * 0.05))
         
         return xp
     }
@@ -224,10 +262,7 @@ final class SoloModeManager: ObservableObject {
         progress.lastPlayedDate = Date()
         soloProgress = progress
         
-        Task {
-            await saveProgress()
-            await checkStreakAchievements()
-        }
+        Task { await saveProgress() }
     }
     
     // MARK: - Hints
@@ -240,37 +275,28 @@ final class SoloModeManager: ObservableObject {
         
         if let lastReset = progress.lastHintResetDate {
             let lastResetDay = calendar.startOfDay(for: lastReset)
-            
             if !calendar.isDate(lastResetDay, inSameDayAs: today) {
                 progress.availableHints = 5
                 progress.lastHintResetDate = Date()
                 soloProgress = progress
-                
-                Task {
-                    await saveProgress()
-                }
+                Task { await saveProgress() }
             }
         } else {
             progress.availableHints = 5
             progress.lastHintResetDate = Date()
             soloProgress = progress
-            
-            Task {
-                await saveProgress()
-            }
+            Task { await saveProgress() }
         }
     }
     
     func useHint() async -> Bool {
         guard var progress = soloProgress else { return false }
-        
         if progress.availableHints > 0 {
             progress.availableHints -= 1
             soloProgress = progress
             await saveProgress()
             return true
         }
-        
         return false
     }
     
@@ -278,94 +304,41 @@ final class SoloModeManager: ObservableObject {
     
     private func checkAchievements(session: SoloSession) async {
         guard let progress = soloProgress else { return }
-        
         var newAchievements: [Achievement] = []
         
-        if progress.totalCorrectWords == 1 && !progress.achievements.contains("first_word") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "first_word" }) {
-                newAchievements.append(achievement)
+        if progress.totalCorrectWords >= 1 && !progress.achievements.contains("first_word") {
+            if let a = Achievement.allAchievements.first(where: { $0.id == "first_word" }) {
+                newAchievements.append(a)
             }
         }
         
-        if session.sessionStats.longestPerfectStreak >= 10 && !progress.achievements.contains("perfect_10") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "perfect_10" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        if session.sessionStats.fastestWordTime < 5.0 && session.correctWords.count >= 5 && !progress.achievements.contains("speed_demon") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "speed_demon" }) {
-                newAchievements.append(achievement)
+        if session.sessionStats.longestStreak >= 10 && !progress.achievements.contains("perfect_10") {
+            if let a = Achievement.allAchievements.first(where: { $0.id == "perfect_10" }) {
+                newAchievements.append(a)
             }
         }
         
         if progress.totalCorrectWords >= 100 && !progress.achievements.contains("century") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "century" }) {
-                newAchievements.append(achievement)
+            if let a = Achievement.allAchievements.first(where: { $0.id == "century" }) {
+                newAchievements.append(a)
             }
         }
         
         if session.hintsUsed == 0 && session.correctWords.count >= 5 && !progress.achievements.contains("no_hints") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "no_hints" }) {
-                newAchievements.append(achievement)
+            if let a = Achievement.allAchievements.first(where: { $0.id == "no_hints" }) {
+                newAchievements.append(a)
             }
         }
         
-        if progress.totalWordsSpelled >= 50 && progress.accuracyPercentage >= 80 && !progress.achievements.contains("accuracy_80") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "accuracy_80" }) {
-                newAchievements.append(achievement)
+        if progress.level >= 5 && !progress.achievements.contains("level_5") {
+            if let a = Achievement.allAchievements.first(where: { $0.id == "level_5" }) {
+                newAchievements.append(a)
             }
         }
         
-        if progress.totalWordsSpelled >= 100 && progress.accuracyPercentage >= 95 && !progress.achievements.contains("accuracy_95") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "accuracy_95" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        await unlockAchievements(newAchievements)
-    }
-    
-    private func checkStreakAchievements() async {
-        guard let progress = soloProgress else { return }
-        
-        var newAchievements: [Achievement] = []
-        
-        if progress.currentStreak >= 3 && !progress.achievements.contains("streak_3") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "streak_3" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        if progress.currentStreak >= 7 && !progress.achievements.contains("streak_7") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "streak_7" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        if progress.currentStreak >= 30 && !progress.achievements.contains("streak_30") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "streak_30" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        await unlockAchievements(newAchievements)
-    }
-    
-    private func checkLevelAchievement(level: Int) async {
-        guard let progress = soloProgress else { return }
-        
-        var newAchievements: [Achievement] = []
-        
-        if level >= 5 && !progress.achievements.contains("level_5") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "level_5" }) {
-                newAchievements.append(achievement)
-            }
-        }
-        
-        if level >= 10 && !progress.achievements.contains("level_10") {
-            if let achievement = Achievement.allAchievements.first(where: { $0.id == "level_10" }) {
-                newAchievements.append(achievement)
+        if progress.level >= 10 && !progress.achievements.contains("level_10") {
+            if let a = Achievement.allAchievements.first(where: { $0.id == "level_10" }) {
+                newAchievements.append(a)
             }
         }
         
@@ -378,49 +351,12 @@ final class SoloModeManager: ObservableObject {
         for achievement in achievements {
             if !progress.achievements.contains(achievement.id) {
                 progress.achievements.append(achievement.id)
-                await addXP(achievement.xpReward)
+                progress.xp += achievement.xpReward
             }
         }
         
         unlockedAchievements = achievements
-        
         soloProgress = progress
         await saveProgress()
-    }
-    
-    // MARK: - Level History
-    
-    private func updateLevelHistory(session: SoloSession) {
-        guard var progress = soloProgress else { return }
-        
-        if let index = progress.levelHistory.firstIndex(where: { $0.level == session.level }) {
-            var stats = progress.levelHistory[index]
-            stats.attempts += 1
-            stats.correctWords += session.correctWords.count
-            stats.totalWords += session.wordCount
-            
-            let sessionAccuracy = session.accuracy
-            if sessionAccuracy > stats.bestAccuracy {
-                stats.bestAccuracy = sessionAccuracy
-            }
-            
-            let totalTime = stats.averageTime * Double(stats.attempts - 1)
-            let sessionAvgTime = session.sessionStats.averageWordTime
-            stats.averageTime = (totalTime + sessionAvgTime) / Double(stats.attempts)
-            
-            progress.levelHistory[index] = stats
-        } else {
-            let newStats = LevelStats(
-                level: session.level,
-                attempts: 1,
-                correctWords: session.correctWords.count,
-                totalWords: session.wordCount,
-                averageTime: session.sessionStats.averageWordTime,
-                bestAccuracy: session.accuracy
-            )
-            progress.levelHistory.append(newStats)
-        }
-        
-        soloProgress = progress
     }
 }

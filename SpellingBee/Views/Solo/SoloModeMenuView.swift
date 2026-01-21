@@ -4,84 +4,84 @@ struct SoloModeMenuView: View {
     @EnvironmentObject var soloManager: SoloModeManager
     @EnvironmentObject var gameManager: GameManager
     @State private var showingSessionView = false
-    @State private var selectedLevel: Int?
-    @State private var showingStatsView = false
-    @State private var showingAchievementsView = false
+    @State private var showingStatsSheet = false
+    @State private var showingAchievementsSheet = false
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Header with level and XP
-                if let progress = soloManager.soloProgress {
-                    PlayerProgressHeader(progress: progress)
-                        .padding(.horizontal)
-                    
-                    // Streak indicator
-                    StreakIndicator(currentStreak: progress.currentStreak, longestStreak: progress.longestStreak)
-                        .padding(.horizontal)
-                    
-                    // Quick stats
-                    QuickStatsView(progress: progress)
-                        .padding(.horizontal)
-                    
-                    // Level selection
-                    LevelSelectionView(
-                        currentLevel: progress.level,
-                        onLevelSelected: { level in
-                            selectedLevel = level
+        VStack(spacing: 0) {
+            if let progress = soloManager.soloProgress {
+                let config = SoloLevelConfig.config(for: progress.level)
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        Spacer(minLength: 20)
+                        
+                        // Level Badge
+                        LevelBadgeView(level: progress.level, config: config)
+                        
+                        // Mission Card
+                        MissionCard(config: config)
+                        
+                        // Start Button
+                        StartButton(isLoading: soloManager.isLoading) {
                             Task {
-                                await startSession(level: level)
+                                await startSession(level: progress.level)
                             }
                         }
-                    )
-                    .padding(.horizontal)
-                    
-                    // Action buttons
-                    HStack(spacing: 16) {
-                        MenuActionButton(
-                            title: "Statistics",
-                            icon: "chart.bar.fill",
-                            color: .blue,
-                            action: { showingStatsView = true }
-                        )
                         
-                        MenuActionButton(
-                            title: "Achievements",
-                            icon: "trophy.fill",
-                            color: .yellow,
-                            action: { showingAchievementsView = true }
-                        )
+                        // Quick info pills
+                        QuickInfoPills(progress: progress)
+                        
+                        Spacer(minLength: 40)
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 24)
+                }
+                
+                // Bottom action bar
+                BottomActionBar(
+                    onStatsTap: { showingStatsSheet = true },
+                    onAchievementsTap: { showingAchievementsSheet = true }
+                )
+            } else {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("Loading progress...")
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(.vertical)
         }
-        .navigationTitle("Solo Practice")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("Solo Mode")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingSessionView) {
-            if let session = soloManager.currentSession {
-                SoloSessionView(session: session)
+            if soloManager.currentSession != nil {
+                SoloSessionView()
                     .environmentObject(soloManager)
             }
         }
-        .sheet(isPresented: $showingStatsView) {
+        .sheet(isPresented: $showingStatsSheet) {
             if let progress = soloManager.soloProgress {
                 StatisticsView(progress: progress)
             }
         }
-        .sheet(isPresented: $showingAchievementsView) {
+        .sheet(isPresented: $showingAchievementsSheet) {
             if let progress = soloManager.soloProgress {
                 AchievementsView(progress: progress)
             }
         }
-        .overlay(
-            Group {
-                if soloManager.isLoading {
-                    LoadingOverlay()
-                }
+        .overlay {
+            if soloManager.isLoading {
+                LoadingOverlay(message: soloManager.loadingMessage)
             }
-        )
+        }
+        .alert("Error", isPresented: .init(
+            get: { soloManager.errorMessage != nil },
+            set: { if !$0 { soloManager.errorMessage = nil } }
+        )) {
+            Button("OK") { soloManager.errorMessage = nil }
+        } message: {
+            Text(soloManager.errorMessage ?? "")
+        }
         .task {
             if soloManager.soloProgress == nil, let userID = gameManager.currentUser?.id {
                 await soloManager.loadProgress(for: userID)
@@ -97,216 +97,189 @@ struct SoloModeMenuView: View {
         guard let userID = gameManager.currentUser?.id else { return }
         
         do {
-            _ = try await soloManager.createSession(userID: userID, level: level, wordCount: 10)
+            _ = try await soloManager.createSession(userID: userID, level: level)
             showingSessionView = true
         } catch {
-            print("Error creating session: \(error)")
+            soloManager.errorMessage = "Failed to start session: \(error.localizedDescription)"
         }
     }
 }
 
-// MARK: - Player Progress Header
-struct PlayerProgressHeader: View {
-    let progress: SoloProgress
+// MARK: - Level Badge
+struct LevelBadgeView: View {
+    let level: Int
+    let config: SoloLevelConfig
+    
+    private var tierGradient: [Color] {
+        switch level {
+        case 1...5: return [.green, .mint]
+        case 6...10: return [.blue, .cyan]
+        case 11...15: return [.purple, .indigo]
+        case 16...20: return [.red, .orange]
+        default: return [.yellow, .orange]
+        }
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            // Level badge
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Level \(progress.level)")
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundColor(.primary)
-                    
-                    Text("\(progress.xp) / \(progress.xpToNextLevel) XP")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
+        VStack(spacing: 12) {
+            ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            gradient: Gradient(colors: [.blue, .purple]),
+                            gradient: Gradient(colors: tierGradient),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 80, height: 80)
-                    .overlay(
-                        VStack(spacing: 2) {
-                            Text("\(progress.level)")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                            Text("LVL")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    )
-            }
-            
-            // XP Progress bar
-            VStack(alignment: .leading, spacing: 4) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .frame(height: 16)
-                        
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [.blue, .purple]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: geometry.size.width * progress.progressToNextLevel, height: 16)
-                            .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress.progressToNextLevel)
-                    }
-                }
-                .frame(height: 16)
+                    .frame(width: 140, height: 140)
+                    .shadow(color: tierGradient[0].opacity(0.4), radius: 15, x: 0, y: 8)
                 
-                HStack {
-                    Text("\(Int(progress.progressToNextLevel * 100))% to next level")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                VStack(spacing: 4) {
+                    Text("\(level)")
+                        .font(.system(size: 52, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
                     
-                    Spacer()
-                    
-                    Text("\(progress.xpToNextLevel - progress.xp) XP needed")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text("LEVEL")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
+                        .tracking(2)
                 }
             }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemGray6))
-        )
-    }
-}
-
-// MARK: - Streak Indicator
-struct StreakIndicator: View {
-    let currentStreak: Int
-    let longestStreak: Int
-    
-    var body: some View {
-        HStack(spacing: 20) {
-            StreakBadge(
-                value: currentStreak,
-                label: "Current Streak",
-                icon: "flame.fill",
-                color: currentStreak > 0 ? .orange : .gray
-            )
             
-            StreakBadge(
-                value: longestStreak,
-                label: "Longest Streak",
-                icon: "star.fill",
-                color: .yellow
-            )
+            Text(config.tierName)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemGray6))
-        )
     }
 }
 
-struct StreakBadge: View {
-    let value: Int
-    let label: String
-    let icon: String
-    let color: Color
+// MARK: - Mission Card
+struct MissionCard: View {
+    let config: SoloLevelConfig
     
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "flag.fill")
+                    .foregroundColor(.orange)
+                Text("MISSION")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.orange)
+                    .tracking(1.5)
+                Spacer()
+            }
+            
+            Text(config.missionText)
                 .font(.title2)
-                .foregroundColor(color)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(value)")
+            Divider()
+            
+            HStack(spacing: 24) {
+                MissionDetail(icon: "textformat.size", label: config.difficultyDescription)
+                MissionDetail(icon: "timer", label: "\(Int(config.timeLimit))s per word")
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemGray6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+struct MissionDetail: View {
+    let icon: String
+    let label: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+// MARK: - Start Button
+struct StartButton: View {
+    let isLoading: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                } else {
+                    Image(systemName: "play.fill")
+                        .font(.title2)
+                }
+                
+                Text(isLoading ? "Loading..." : "Start Level")
                     .font(.title3)
                     .fontWeight(.bold)
-                    .foregroundColor(.primary)
-                
-                Text(label)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
             }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: isLoading ? [.gray, .gray] : [.green, .blue]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(16)
+            .shadow(color: isLoading ? .clear : .green.opacity(0.3), radius: 8, x: 0, y: 4)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(isLoading)
+        .scaleEffect(isLoading ? 0.98 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isLoading)
     }
 }
 
-// MARK: - Quick Stats View
-struct QuickStatsView: View {
+// MARK: - Quick Info Pills
+struct QuickInfoPills: View {
     let progress: SoloProgress
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Statistics")
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            HStack(spacing: 16) {
-                StatItem(
-                    icon: "checkmark.circle.fill",
-                    value: "\(progress.totalCorrectWords)",
-                    label: "Correct",
-                    color: .green
-                )
-                
-                StatItem(
-                    icon: "xmark.circle.fill",
-                    value: "\(progress.totalIncorrectWords)",
-                    label: "Incorrect",
-                    color: .red
-                )
-                
-                StatItem(
-                    icon: "percent",
-                    value: "\(progress.accuracyPercentage)%",
-                    label: "Accuracy",
-                    color: .blue
-                )
-                
-                StatItem(
-                    icon: "lightbulb.fill",
-                    value: "\(progress.availableHints)",
-                    label: "Hints",
-                    color: .yellow
-                )
-            }
+        HStack(spacing: 12) {
+            InfoPill(icon: "flame.fill", value: "\(progress.currentStreak)", label: "Streak", color: .orange)
+            InfoPill(icon: "percent", value: "\(progress.accuracyPercentage)%", label: "Accuracy", color: .blue)
+            InfoPill(icon: "star.fill", value: "\(progress.xp)", label: "XP", color: .yellow)
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemGray6))
-        )
     }
 }
 
-struct StatItem: View {
+struct InfoPill: View {
     let icon: String
     let value: String
     let label: String
     let color: Color
     
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.title3)
+                .font(.caption)
                 .foregroundColor(color)
             
             Text(value)
-                .font(.headline)
+                .font(.subheadline)
+                .fontWeight(.bold)
                 .foregroundColor(.primary)
             
             Text(label)
@@ -314,141 +287,51 @@ struct StatItem: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Level Selection View
-struct LevelSelectionView: View {
-    let currentLevel: Int
-    let onLevelSelected: (Int) -> Void
-    
-    private let columns = [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible())
-    ]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Select Level")
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(1...min(currentLevel + 1, 15), id: \.self) { level in
-                    LevelButton(
-                        level: level,
-                        isUnlocked: level <= currentLevel,
-                        isCurrent: level == currentLevel,
-                        onTap: { onLevelSelected(level) }
-                    )
-                }
-            }
-            
-            if currentLevel < 10 {
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.caption)
-                    Text("Levels 1-10: Word length increases with difficulty")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 4)
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "star.fill")
-                        .foregroundColor(.yellow)
-                        .font(.caption)
-                    Text("Level 11+: Curated challenging words")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 4)
-            }
-        }
-        .padding()
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.systemGray6))
         )
     }
 }
 
-struct LevelButton: View {
-    let level: Int
-    let isUnlocked: Bool
-    let isCurrent: Bool
-    let onTap: () -> Void
+// MARK: - Bottom Action Bar
+struct BottomActionBar: View {
+    let onStatsTap: () -> Void
+    let onAchievementsTap: () -> Void
     
     var body: some View {
-        Button(action: {
-            if isUnlocked {
-                onTap()
-            }
-        }) {
-            VStack(spacing: 4) {
-                Text("\(level)")
-                    .font(.title3)
-                    .fontWeight(.bold)
-                
-                if isCurrent {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
+        HStack(spacing: 0) {
+            Button(action: onStatsTap) {
+                VStack(spacing: 4) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.title3)
+                    Text("Statistics")
+                        .font(.caption2)
                 }
+                .foregroundColor(.blue)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
             }
-            .frame(height: 60)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isUnlocked ? (isCurrent ? Color.blue.opacity(0.2) : Color(.systemBackground)) : Color(.systemGray5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isCurrent ? Color.blue : Color.clear, lineWidth: 2)
-            )
-            .overlay(
-                Group {
-                    if !isUnlocked {
-                        Image(systemName: "lock.fill")
-                            .foregroundColor(.gray)
-                    }
+            
+            Divider()
+                .frame(height: 30)
+            
+            Button(action: onAchievementsTap) {
+                VStack(spacing: 4) {
+                    Image(systemName: "trophy.fill")
+                        .font(.title3)
+                    Text("Achievements")
+                        .font(.caption2)
                 }
-            )
-        }
-        .disabled(!isUnlocked)
-        .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - Menu Action Button
-struct MenuActionButton: View {
-    let title: String
-    let icon: String
-    let color: Color
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(title)
-                    .font(.headline)
+                .foregroundColor(.yellow)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
             }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [color, color.opacity(0.8)]),
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .cornerRadius(12)
         }
+        .background(
+            Color(.systemGray6)
+                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: -2)
+        )
     }
 }

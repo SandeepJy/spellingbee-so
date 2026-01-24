@@ -33,6 +33,7 @@ struct WordWithDetails: Sendable {
     let word: String
     let audioURL: String?
     let definition: String?
+    let exampleSentence: String?
 }
 
 /// Response structure for the Firebase hard words API
@@ -43,8 +44,7 @@ struct HardWordsResponse: Codable, Sendable {
 actor WordAPIService {
     static let shared = WordAPIService()
     
-    // TODO: Replace with your actual Firebase API endpoint
-    private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getRandomWords"
+    private let hardWordsAPIEndpoint = "https://us-central1-spellingbee-20c3f.cloudfunctions.net/getWordsByLevel"
     
     private init() {}
     
@@ -69,7 +69,7 @@ actor WordAPIService {
     
     /// Fetches hard difficulty words from Firebase API (requires authentication)
     func fetchHardWords(count: Int, userToken: String) async throws -> [String] {
-        let urlString = "\(hardWordsAPIEndpoint)?count=\(count)"
+        let urlString = "\(hardWordsAPIEndpoint)?level=8&count=\(count)"
         
         guard let url = URL(string: urlString) else {
             throw WordAPIError.invalidURL
@@ -128,6 +128,45 @@ actor WordAPIService {
         }
     }
     
+    /// Extracts the best audio URL from phonetics array
+    private func extractAudioURL(from phonetics: [Phonetic]) -> String? {
+        // Find first phonetic with a non-empty audio URL
+        return phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
+    }
+    
+    /// Extracts the first definition from meanings
+    private func extractDefinition(from meanings: [Meaning]) -> String? {
+        // Get the first definition from the first meaning
+        return meanings.first?.definitions.first?.definition
+    }
+    
+    /// Extracts the first example sentence from meanings
+    private func extractExampleSentence(from meanings: [Meaning]) -> String? {
+        // Search through all meanings and definitions to find the first example
+        for meaning in meanings {
+            for definition in meaning.definitions {
+                if let example = definition.example, !example.isEmpty {
+                    return example
+                }
+            }
+        }
+        return nil
+    }
+    
+    /// Parses DictionaryResponse into WordWithDetails
+    private func parseWordDetails(from response: DictionaryResponse) async -> WordWithDetails {
+        let audioURL = extractAudioURL(from: response.phonetics)
+        let definition = extractDefinition(from: response.meanings)
+        let exampleSentence = extractExampleSentence(from: response.meanings)
+        
+        return WordWithDetails(
+            word: response.word,
+            audioURL: audioURL,
+            definition: definition,
+            exampleSentence: exampleSentence
+        )
+    }
+    
     /// Fetches random words with their details and audio URLs (for easy/medium difficulty)
     func fetchRandomWordsWithDetails(count: Int = 10, length: Int = 5) async throws -> [WordWithDetails] {
         let requestCount = count * 3
@@ -142,7 +181,7 @@ actor WordAPIService {
     
     /// Fetches hard words with their details and audio URLs (for hard difficulty)
     func fetchHardWordsWithDetails(count: Int, userToken: String) async throws -> [WordWithDetails] {
-        let requestCount = count // Request extra in case some don't have audio
+        let requestCount = count
         
         print("🔥 Requesting \(requestCount) hard words from Firebase API to get \(count) with audio...")
         
@@ -161,11 +200,11 @@ actor WordAPIService {
                 group.addTask {
                     do {
                         let details = try await self.fetchWordDetails(word: word)
-                        let audioURL = details.phonetics.first(where: { $0.audio != nil && !$0.audio!.isEmpty })?.audio
-                        let definition = details.meanings.first?.definitions.first?.definition
+                        let wordWithDetails =  await self.parseWordDetails(from: details)
                         
-                        if audioURL != nil {
-                            return WordWithDetails(word: word, audioURL: audioURL, definition: definition)
+                        // Only include words that have audio
+                        if wordWithDetails.audioURL != nil {
+                            return wordWithDetails
                         }
                         return nil
                     } catch {
@@ -195,8 +234,89 @@ actor WordAPIService {
         }
         
         print("🎉 Successfully returning \(finalWords.count) words:")
-        finalWords.forEach { print("   - \($0.word)") }
+        finalWords.forEach { print("   - \($0.word): \($0.definition?.prefix(50) ?? "No definition")...") }
         
         return finalWords
+    }
+    
+    /// Fetches details for a single word (used for review screen)
+    func fetchSingleWordDetails(word: String) async -> WordWithDetails? {
+        do {
+            let details = try await fetchWordDetails(word: word)
+            return await parseWordDetails(from: details)
+        } catch {
+            print("⚠️ Failed to fetch details for '\(word)': \(error.localizedDescription)")
+            return nil
+        }
+    }
+}
+
+// Add to WordAPIService
+extension WordAPIService {
+    /// Fetch words for solo mode based on level
+    func fetchWordsForSoloMode(level: Int, count: Int = 10, userToken: String? = nil) async throws -> [WordWithDetails] {
+        if level <= 10 {
+            // Levels 1-10: Use word length for difficulty
+            let wordLength = calculateWordLengthForLevel(level)
+            return try await fetchRandomWordsWithDetails(count: count, length: wordLength)
+        } else {
+            // Levels 11+: Use Firebase curated hard words
+            guard let token = userToken else {
+                throw WordAPIError.authenticationRequired
+            }
+            
+            // Map level to Firebase difficulty (11+ maps to increasingly harder words)
+            let firebaseLevel = min(level - 8, 10) // Level 11 = 3, Level 12 = 4, etc.
+            return try await fetchHardWordsWithDetails(count: count, userToken: token, level: firebaseLevel)
+        }
+    }
+    
+    private func calculateWordLengthForLevel(_ level: Int) -> Int {
+        switch level {
+        case 1...2: return 3
+        case 3...4: return 4
+        case 5...6: return 5
+        case 7...8: return 6
+        case 9...10: return 7
+        default: return 8
+        }
+    }
+    
+    /// Modified to support custom difficulty level for Firebase
+    func fetchHardWordsWithDetails(count: Int, userToken: String, level: Int = 8) async throws -> [WordWithDetails] {
+        let urlString = "\(hardWordsAPIEndpoint)?level=\(level)&count=\(count)"
+        
+        guard let url = URL(string: urlString) else {
+            throw WordAPIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(userToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        print("🔥 Fetching hard words from Firebase API with level: \(level)...")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WordAPIError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            print("❌ Firebase API returned status code: \(httpResponse.statusCode)")
+            throw WordAPIError.networkError("HTTP \(httpResponse.statusCode)")
+        }
+        
+        do {
+            let hardWordsResponse = try JSONDecoder().decode(HardWordsResponse.self, from: data)
+            print("✅ Received \(hardWordsResponse.words.count) hard words from Firebase")
+            
+            let words = hardWordsResponse.words
+            return try await fetchDetailsForWords(words: words, targetCount: count)
+        } catch {
+            print("Decoding error: \(error)")
+            throw WordAPIError.decodingError
+        }
     }
 }

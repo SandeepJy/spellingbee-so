@@ -198,27 +198,16 @@ struct CreateGameView: View {
         var participantsIDs = selectedUsers.map { $0.id }
         participantsIDs.append(currentUser.id)
         
-        guard let gameID = await gameManager.createGame(
-            creatorID: currentUser.id,
-            participantsIDs: Set(participantsIDs),
-            difficulty: selectedDifficulty,
-            wordCount: numberOfWords
-        ) else {
-            isCreatingGame = false
-            errorMessage = "Failed to create game"
-            return
-        }
-        
         do {
-            _ = try await gameManager.generateWordsForGame(
-                gameID: gameID,
-                wordCount: numberOfWords,
-                difficulty: selectedDifficulty
+            _ = try await gameManager.createGameWithWords(
+                creatorID: currentUser.id,
+                participantsIDs: Set(participantsIDs),
+                difficulty: selectedDifficulty,
+                wordCount: numberOfWords
             )
-            _ = await gameManager.startGame(gameID: gameID)
             showCreateGameView = false
         } catch {
-            errorMessage = "Failed to generate words: \(error.localizedDescription)"
+            errorMessage = "Failed to create game: \(error.localizedDescription)"
         }
         
         isCreatingGame = false

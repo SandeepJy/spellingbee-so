@@ -6,15 +6,26 @@ struct UserGameProgress: Identifiable, Codable, Hashable, Sendable {
     let gameID: UUID
     var completedWordIndices: [Int]
     var correctlySpelledWords: [String]
+    var misspelledWords: [MisspelledWord]
     var currentWordIndex: Int
     var score: Int
     var lastUpdated: Date
     
-    init(userID: String, gameID: UUID, completedWordIndices: [Int] = [], correctlySpelledWords: [String] = [], currentWordIndex: Int = 0, score: Int = 0, lastUpdated: Date = Date()) {
+    init(
+        userID: String,
+        gameID: UUID,
+        completedWordIndices: [Int] = [],
+        correctlySpelledWords: [String] = [],
+        misspelledWords: [MisspelledWord] = [],
+        currentWordIndex: Int = 0,
+        score: Int = 0,
+        lastUpdated: Date = Date()
+    ) {
         self.userID = userID
         self.gameID = gameID
         self.completedWordIndices = completedWordIndices
         self.correctlySpelledWords = correctlySpelledWords
+        self.misspelledWords = misspelledWords
         self.currentWordIndex = currentWordIndex
         self.score = score
         self.lastUpdated = lastUpdated
@@ -31,5 +42,15 @@ struct UserGameProgress: Identifiable, Codable, Hashable, Sendable {
     
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+    }
+    
+    /// Get the user's answer for a misspelled word
+    func getUserAnswer(for word: String) -> String? {
+        misspelledWords.first { $0.correctWord == word }?.userAnswer
+    }
+    
+    /// Check if a word was misspelled
+    func wasMisspelled(_ word: String) -> Bool {
+        misspelledWords.contains { $0.correctWord == word }
     }
 }

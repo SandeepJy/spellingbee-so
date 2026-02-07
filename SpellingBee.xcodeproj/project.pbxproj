@@ -105,7 +105,6 @@
 				EB7A20102F1EE6F90003C269 /* Services */,
 				EB7A20062F1EE5310003C269 /* Models */,
 				EB7A20012F1EE4430003C269 /* Core */,
-				EB5FC8842EE49BC400B1718E /* Service */,
 				EB70CDA92DAB438300C2F52E /* Views */,
 				EB16AE9B2C5DB5E90017F738 /* Assets.xcassets */,
 				EBA5DA062DBD9E150028AA20 /* search.png */,
@@ -122,13 +121,6 @@
 				EB16AE9F2C5DB5E90017F738 /* Preview Assets.xcassets */,
 			);
 			path = "Preview Content";
-			sourceTree = "<group>";
-		};
-		EB5FC8842EE49BC400B1718E /* Service */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Service;
 			sourceTree = "<group>";
 		};
 		EB6426312F101993002E3247 /* SoloMode */ = {

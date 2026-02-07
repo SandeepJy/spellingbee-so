@@ -70,7 +70,7 @@ final class SoloModeManager: ObservableObject {
             userID: userID,
             level: level,
             requiredStreak: config.requiredStreak,
-            timeLimit: config.timeLimit
+            timeLimit: config.totalRoundTime
         )
         
         // Get user token for Firebase API

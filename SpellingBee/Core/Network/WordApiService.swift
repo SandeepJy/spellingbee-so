@@ -62,7 +62,7 @@ actor WordAPIService {
     // MARK: - Random Word API (for levels 1-5)
     
     func fetchRandomWords(count: Int = 10, length: Int = 5) async throws -> [String] {
-        let urlString = "https://random-word-api.vercel.app/api?words=\(count)&length=\(length)"
+        let urlString = "https://random-word-api.herokuapp.com/word?number=\(count)&length=\(length)"
         
         guard let url = URL(string: urlString) else {
             throw WordAPIError.invalidURL

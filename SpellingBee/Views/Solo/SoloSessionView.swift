@@ -9,9 +9,11 @@ struct SoloSessionView: View {
     @State private var userInput = ""
     @State private var isPlaying = false
     @State private var hasPlayedWord = false
-    @State private var timeRemaining: Double = 5.0
     @State private var timerTask: Task<Void, Never>?
-    @State private var isTimerRunning = false
+    @State private var roundTimerStarted = false
+    
+    // Round timer (cumulative)
+    @State private var timeRemaining: Double = 0
     
     // Feedback states
     @State private var showCorrectAnswer = false
@@ -79,7 +81,6 @@ struct SoloSessionView: View {
                     .padding(.vertical, 12)
                     
                     if isLevelComplete {
-                        // Level Complete
                         LevelCompleteView(
                             session: session!,
                             xpEarned: calculateXP(),
@@ -92,7 +93,6 @@ struct SoloSessionView: View {
                         )
                         .padding()
                     } else if isOutOfWords {
-                        // Ran out of words without completing
                         OutOfWordsView(
                             session: session!,
                             onRetry: { dismiss() }
@@ -102,11 +102,11 @@ struct SoloSessionView: View {
                         // Active gameplay
                         ScrollView {
                             VStack(spacing: 20) {
-                                // Timer
-                                TimerView(
+                                // Round Timer (cumulative)
+                                RoundTimerView(
                                     timeRemaining: timeRemaining,
-                                    timeLimit: config.timeLimit,
-                                    isRunning: isTimerRunning
+                                    totalTime: config.totalRoundTime,
+                                    isRunning: roundTimerStarted
                                 )
                                 
                                 // Play button
@@ -176,8 +176,14 @@ struct SoloSessionView: View {
                 if showTimeUp {
                     overlayBackground
                     TimeUpOverlay(
-                        correctWord: lastCorrectWord,
-                        onDismiss: { moveToNextWord() }
+                        correctWord: "",
+                        onDismiss: {
+                            showTimeUp = false
+                            Task {
+                                await soloManager.completeSession()
+                            }
+                            dismiss()
+                        }
                     )
                     .zIndex(1)
                 }
@@ -208,7 +214,10 @@ struct SoloSessionView: View {
                 .presentationDetents([.height(400)])
             }
         }
-        .onAppear { configureAudioSession() }
+        .onAppear {
+            configureAudioSession()
+            timeRemaining = config.totalRoundTime
+        }
         .onDisappear { timerTask?.cancel() }
     }
     
@@ -248,19 +257,20 @@ struct SoloSessionView: View {
             isPlaying = false
             hasPlayedWord = true
             
-            // Start countdown timer after word finishes playing
-            startCountdown()
+            // Start the round timer on first word play (only once per round)
+            if !roundTimerStarted {
+                startRoundTimer()
+            }
         } catch {
             print("Error playing audio: \(error)")
             isPlaying = false
         }
     }
     
-    // MARK: - Timer
+    // MARK: - Round Timer (Cumulative)
     
-    private func startCountdown() {
-        timeRemaining = config.timeLimit
-        isTimerRunning = true
+    private func startRoundTimer() {
+        roundTimerStarted = true
         timerTask?.cancel()
         
         timerTask = Task {
@@ -270,25 +280,46 @@ struct SoloSessionView: View {
                     timeRemaining -= 0.05
                     if timeRemaining <= 0 {
                         timeRemaining = 0
-                        handleTimeout()
+                        handleRoundTimeout()
                     }
                 }
             }
         }
     }
     
-    private func handleTimeout() {
+    /// Pause timer during overlays
+    private func pauseTimer() {
+        timerTask?.cancel()
+    }
+    
+    /// Resume timer after overlay dismisses
+    private func resumeTimer() {
+        guard roundTimerStarted && timeRemaining > 0 else { return }
+        startRoundTimerFromCurrent()
+    }
+    
+    private func startRoundTimerFromCurrent() {
+        timerTask?.cancel()
+        
+        timerTask = Task {
+            while !Task.isCancelled && timeRemaining > 0 {
+                try? await Task.sleep(for: .milliseconds(50))
+                await MainActor.run {
+                    timeRemaining -= 0.05
+                    if timeRemaining <= 0 {
+                        timeRemaining = 0
+                        handleRoundTimeout()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func handleRoundTimeout() {
         guard !isProcessingAnswer else { return }
         isProcessingAnswer = true
         timerTask?.cancel()
-        isTimerRunning = false
-        
-        lastCorrectWord = currentWord?.word ?? ""
         showTimeUp = true
-        
-        Task {
-            await soloManager.recordTimeout(correctWord: lastCorrectWord)
-        }
     }
     
     // MARK: - Spelling
@@ -297,8 +328,9 @@ struct SoloSessionView: View {
         guard let word = currentWord, !isProcessingAnswer else { return }
         
         isProcessingAnswer = true
-        timerTask?.cancel()
-        isTimerRunning = false
+        
+        // Pause timer during feedback overlay
+        pauseTimer()
         
         let userAnswer = userInput.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let isCorrect = userAnswer == word.word.lowercased()
@@ -308,8 +340,12 @@ struct SoloSessionView: View {
         
         // Update stats
         if var session = soloManager.currentSession {
-            let timeUsed = config.timeLimit - timeRemaining
-            session.sessionStats.updateWithWordTime(timeUsed, wasCorrect: isCorrect, currentStreak: session.currentStreak + (isCorrect ? 1 : 0))
+            let wordTime = config.timePerWord // approximate time used
+            session.sessionStats.updateWithWordTime(
+                wordTime,
+                wasCorrect: isCorrect,
+                currentStreak: session.currentStreak + (isCorrect ? 1 : 0)
+            )
             soloManager.currentSession = session
         }
         
@@ -329,19 +365,22 @@ struct SoloSessionView: View {
         showWrongAnswer = false
         showTimeUp = false
         userInput = ""
-        timeRemaining = config.timeLimit
         hasPlayedWord = false
         isProcessingAnswer = false
-        isTimerRunning = false
         activeHints = []
+        
+        // Resume the round timer (it keeps counting from where it was)
+        if !isLevelComplete && !isOutOfWords && timeRemaining > 0 {
+            resumeTimer()
+        }
     }
     
     private func calculateWordPoints() -> Int {
-        let timeUsed = config.timeLimit - timeRemaining
         let basePoints = 100
-        let timePenalty = Int(timeUsed * 10) // Faster = more points
         let hintPenalty = activeHints.count * 10
-        return max(10, basePoints - timePenalty - hintPenalty)
+        // Bonus for more time remaining
+        let timeBonus = Int((timeRemaining / config.totalRoundTime) * 20)
+        return max(10, basePoints - hintPenalty + timeBonus)
     }
     
     private func calculateXP() -> Int {
@@ -350,6 +389,10 @@ struct SoloSessionView: View {
         if session.isLevelComplete { xp += 50 }
         if session.misspelledWords.isEmpty { xp += 30 }
         if session.hintsUsed == 0 { xp += 20 }
+        // Bonus for time remaining
+        if timeRemaining > 0 {
+            xp += Int(timeRemaining / config.totalRoundTime * 30)
+        }
         xp = Int(Double(xp) * (1.0 + Double(session.level) * 0.05))
         return xp
     }
@@ -453,49 +496,83 @@ struct StreakDotsView: View {
     }
 }
 
-// MARK: - Timer View
-struct TimerView: View {
+// MARK: - Round Timer View (Cumulative)
+struct RoundTimerView: View {
     let timeRemaining: Double
-    let timeLimit: Double
+    let totalTime: Double
     let isRunning: Bool
     
     private var progress: Double {
-        guard timeLimit > 0 else { return 0 }
-        return timeRemaining / timeLimit
+        guard totalTime > 0 else { return 0 }
+        return max(0, timeRemaining / totalTime)
     }
     
     private var timerColor: Color {
-        if timeRemaining <= 1.0 { return .red }
-        if timeRemaining <= 2.0 { return .orange }
+        if progress <= 0.15 { return .red }
+        if progress <= 0.3 { return .orange }
         return .green
     }
     
+    private var formattedTime: String {
+        let minutes = Int(timeRemaining) / 60
+        let seconds = Int(timeRemaining) % 60
+        if minutes > 0 {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+        return String(format: "%.1f", max(0, timeRemaining))
+    }
+    
     var body: some View {
-        VStack(spacing: 8) {
+        HStack(spacing: 16) {
+            // Circular progress
             ZStack {
                 Circle()
-                    .stroke(Color(.systemGray5), lineWidth: 6)
-                    .frame(width: 60, height: 60)
+                    .stroke(Color(.systemGray5), lineWidth: 5)
+                    .frame(width: 50, height: 50)
                 
                 Circle()
-                    .trim(from: 0, to: max(0, progress))
-                    .stroke(timerColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                    .frame(width: 60, height: 60)
+                    .trim(from: 0, to: progress)
+                    .stroke(timerColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: 50, height: 50)
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 0.05), value: timeRemaining)
                 
-                Text(String(format: "%.1f", max(0, timeRemaining)))
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                Image(systemName: "timer")
+                    .font(.system(size: 16))
                     .foregroundColor(timerColor)
             }
             
-            if !isRunning {
-                Text("Play word to start timer")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+            // Time text
+            VStack(alignment: .leading, spacing: 2) {
+                Text(formattedTime)
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundColor(timerColor)
+                
+                if !isRunning {
+                    Text("Starts on first play")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Round timer")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
+            
+            Spacer()
         }
-        .opacity(isRunning || timeRemaining < timeLimit ? 1.0 : 0.5)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemGray6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(progress <= 0.15 ? Color.red.opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+        )
+        .padding(.horizontal)
+        .opacity(isRunning ? 1.0 : 0.6)
     }
 }
 
@@ -575,8 +652,6 @@ struct ActiveHintsDisplay: View {
     }
 }
 
-
-
 // MARK: - Hint Button
 struct HintButton: View {
     let availableHints: Int
@@ -608,30 +683,32 @@ struct TimeUpOverlay: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "clock.badge.xmark")
-                .font(.system(size: 50))
-                .foregroundColor(.orange)
+                .font(.system(size: 60))
+                .foregroundColor(.red)
             
             Text("Time's Up!")
-                .font(.title2)
+                .font(.title)
                 .fontWeight(.bold)
             
-            VStack(spacing: 8) {
-                Text("The word was:")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                Text(correctWord)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color.blue.opacity(0.15))
+            Text("You ran out of time for this round.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Text("Try again to beat the clock!")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Button(action: onDismiss) {
+                Text("Back to Menu")
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue)
                     .cornerRadius(12)
             }
-            
-            Text("Streak reset!")
-                .font(.caption)
-                .foregroundColor(.red)
+            .padding(.top, 8)
         }
         .padding(30)
         .background(
@@ -639,15 +716,12 @@ struct TimeUpOverlay: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.2), radius: 20)
         )
+        .padding(.horizontal, 40)
         .scaleEffect(showContent ? 1.0 : 0.5)
         .opacity(showContent ? 1.0 : 0.0)
         .onAppear {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 showContent = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeOut(duration: 0.3)) { showContent = false }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onDismiss() }
             }
         }
     }

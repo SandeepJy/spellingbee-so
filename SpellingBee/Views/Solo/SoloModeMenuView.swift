@@ -180,9 +180,9 @@ struct MissionCard: View {
             
             Divider()
             
-            HStack(spacing: 24) {
+            HStack(spacing: 20) {
                 MissionDetail(icon: "textformat.size", label: config.difficultyDescription)
-                MissionDetail(icon: "timer", label: "\(Int(config.timeLimit))s per word")
+                MissionDetail(icon: "timer", label: config.timerDescription)
             }
         }
         .padding(20)

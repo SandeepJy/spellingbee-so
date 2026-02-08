@@ -42,6 +42,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		EB6DF8F22F381178007E6821 /* Leaderboard */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Leaderboard; sourceTree = "<group>"; };
 		EB7A20012F1EE4430003C269 /* Core */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Core; sourceTree = "<group>"; };
 		EB7A20062F1EE5310003C269 /* Models */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Models; sourceTree = "<group>"; };
 		EB7A20102F1EE6F90003C269 /* Services */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Services; sourceTree = "<group>"; };
@@ -141,6 +142,7 @@
 		EB70CDA92DAB438300C2F52E /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				EB6DF8F22F381178007E6821 /* Leaderboard */,
 				EB7A20402F1EF5020003C269 /* Solo */,
 				EB7A202C2F1EF2B20003C269 /* Game */,
 				EB7A20252F1EF2220003C269 /* Main */,
@@ -167,6 +169,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				EB6DF8F22F381178007E6821 /* Leaderboard */,
 				EB7A20012F1EE4430003C269 /* Core */,
 				EB7A20062F1EE5310003C269 /* Models */,
 				EB7A20102F1EE6F90003C269 /* Services */,

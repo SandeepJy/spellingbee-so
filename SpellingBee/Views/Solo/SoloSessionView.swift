@@ -25,6 +25,11 @@ struct SoloSessionView: View {
     @State private var showStarExplosion = false
     @State private var showTimeUp = false
     
+    // Round failed state
+    @State private var showRoundFailed = false
+    @State private var failedWord = ""
+    @State private var failedUserAnswer = ""
+    
     // Audio
     @State private var audioPlayer: AVAudioPlayer?
     
@@ -92,6 +97,18 @@ struct SoloSessionView: View {
                             }
                         )
                         .padding()
+                    } else if showRoundFailed {
+                        RoundFailedView(
+                            session: session!,
+                            failedWord: failedWord,
+                            userAnswer: failedUserAnswer,
+                            onTryAgain: {
+                                Task { await restartLevel() }
+                            },
+                            onBackToMenu: {
+                                dismiss()
+                            }
+                        )
                     } else if isOutOfWords {
                         OutOfWordsView(
                             session: session!,
@@ -106,7 +123,7 @@ struct SoloSessionView: View {
                                 RoundTimerView(
                                     timeRemaining: timeRemaining,
                                     totalTime: config.totalRoundTime,
-                                    isRunning: roundTimerStarted
+                                    isRunning: roundTimerStarted && !isProcessingAnswer
                                 )
                                 
                                 // Play button
@@ -159,7 +176,7 @@ struct SoloSessionView: View {
                     CorrectSpellingOverlay(
                         correctWord: lastCorrectWord,
                         userAnswer: lastUserAnswer,
-                        onDismiss: { moveToNextWord() }
+                        onDismiss: { handleWrongAnswerDismiss() }
                     )
                     .zIndex(1)
                 }
@@ -253,26 +270,35 @@ struct SoloSessionView: View {
             if let duration = audioPlayer?.duration {
                 try await Task.sleep(for: .seconds(duration))
             }
-            
-            isPlaying = false
-            hasPlayedWord = true
-            
-            // Start the round timer on first word play (only once per round)
-            if !roundTimerStarted {
-                startRoundTimer()
-            }
         } catch {
             print("Error playing audio: \(error)")
-            isPlaying = false
+        }
+        
+        isPlaying = false
+        hasPlayedWord = true
+        
+        // Start or resume the timer after audio finishes
+        if !roundTimerStarted {
+            startRoundTimer()
+        } else {
+            resumeTimerFromCurrent()
         }
     }
     
-    // MARK: - Round Timer (Cumulative)
+    // MARK: - Round Timer
     
     private func startRoundTimer() {
         roundTimerStarted = true
+        runTimerLoop()
+    }
+    
+    private func resumeTimerFromCurrent() {
+        guard timeRemaining > 0 else { return }
+        runTimerLoop()
+    }
+    
+    private func runTimerLoop() {
         timerTask?.cancel()
-        
         timerTask = Task {
             while !Task.isCancelled && timeRemaining > 0 {
                 try? await Task.sleep(for: .milliseconds(50))
@@ -287,38 +313,15 @@ struct SoloSessionView: View {
         }
     }
     
-    /// Pause timer during overlays
     private func pauseTimer() {
         timerTask?.cancel()
-    }
-    
-    /// Resume timer after overlay dismisses
-    private func resumeTimer() {
-        guard roundTimerStarted && timeRemaining > 0 else { return }
-        startRoundTimerFromCurrent()
-    }
-    
-    private func startRoundTimerFromCurrent() {
-        timerTask?.cancel()
-        
-        timerTask = Task {
-            while !Task.isCancelled && timeRemaining > 0 {
-                try? await Task.sleep(for: .milliseconds(50))
-                await MainActor.run {
-                    timeRemaining -= 0.05
-                    if timeRemaining <= 0 {
-                        timeRemaining = 0
-                        handleRoundTimeout()
-                    }
-                }
-            }
-        }
+        timerTask = nil
     }
     
     private func handleRoundTimeout() {
         guard !isProcessingAnswer else { return }
         isProcessingAnswer = true
-        timerTask?.cancel()
+        pauseTimer()
         showTimeUp = true
     }
     
@@ -328,8 +331,6 @@ struct SoloSessionView: View {
         guard let word = currentWord, !isProcessingAnswer else { return }
         
         isProcessingAnswer = true
-        
-        // Pause timer during feedback overlay
         pauseTimer()
         
         let userAnswer = userInput.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -338,9 +339,8 @@ struct SoloSessionView: View {
         lastCorrectWord = word.word
         lastUserAnswer = userInput
         
-        // Update stats
         if var session = soloManager.currentSession {
-            let wordTime = config.timePerWord // approximate time used
+            let wordTime = config.timePerWord
             session.sessionStats.updateWithWordTime(
                 wordTime,
                 wasCorrect: isCorrect,
@@ -355,9 +355,23 @@ struct SoloSessionView: View {
             showCorrectAnswer = true
             Task { await soloManager.recordCorrectWord(word: word.word) }
         } else {
+            // Store failed word info for the round failed screen
+            failedWord = word.word
+            failedUserAnswer = userInput
             showWrongAnswer = true
             Task { await soloManager.recordIncorrectWord(correctWord: word.word, userAnswer: userInput) }
         }
+    }
+    
+    private func handleWrongAnswerDismiss() {
+        showWrongAnswer = false
+        userInput = ""
+        hasPlayedWord = false
+        isProcessingAnswer = false
+        activeHints = []
+        
+        // Show round failed screen instead of continuing
+        showRoundFailed = true
     }
     
     private func moveToNextWord() {
@@ -368,17 +382,43 @@ struct SoloSessionView: View {
         hasPlayedWord = false
         isProcessingAnswer = false
         activeHints = []
+    }
+    
+    private func restartLevel() async {
+        guard let userID = session?.userID, let level = session?.level else {
+            dismiss()
+            return
+        }
         
-        // Resume the round timer (it keeps counting from where it was)
-        if !isLevelComplete && !isOutOfWords && timeRemaining > 0 {
-            resumeTimer()
+        // Reset states
+        showRoundFailed = false
+        showCorrectAnswer = false
+        showWrongAnswer = false
+        showTimeUp = false
+        userInput = ""
+        hasPlayedWord = false
+        isProcessingAnswer = false
+        activeHints = []
+        roundTimerStarted = false
+        failedWord = ""
+        failedUserAnswer = ""
+        
+        // Reset timer
+        timerTask?.cancel()
+        timeRemaining = config.totalRoundTime
+        
+        // Create new session
+        do {
+            _ = try await soloManager.createSession(userID: userID, level: level)
+        } catch {
+            print("Failed to restart level: \(error)")
+            dismiss()
         }
     }
     
     private func calculateWordPoints() -> Int {
         let basePoints = 100
         let hintPenalty = activeHints.count * 10
-        // Bonus for more time remaining
         let timeBonus = Int((timeRemaining / config.totalRoundTime) * 20)
         return max(10, basePoints - hintPenalty + timeBonus)
     }
@@ -389,7 +429,6 @@ struct SoloSessionView: View {
         if session.isLevelComplete { xp += 50 }
         if session.misspelledWords.isEmpty { xp += 30 }
         if session.hintsUsed == 0 { xp += 20 }
-        // Bonus for time remaining
         if timeRemaining > 0 {
             xp += Int(timeRemaining / config.totalRoundTime * 30)
         }
@@ -424,7 +463,232 @@ struct SoloSessionView: View {
     }
 }
 
+// MARK: - Round Failed View
+
+struct RoundFailedView: View {
+    let session: SoloSession
+    let failedWord: String
+    let userAnswer: String
+    let onTryAgain: () -> Void
+    let onBackToMenu: () -> Void
+    
+    @State private var showContent = false
+    
+    private var streakProgress: String {
+        "\(session.currentStreak)/\(session.requiredStreak)"
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Scrollable content
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Icon
+                    ZStack {
+                        Circle()
+                            .fill(Color.red.opacity(0.15))
+                            .frame(width: 120, height: 120)
+                        
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 70))
+                            .foregroundColor(.red)
+                    }
+                    .scaleEffect(showContent ? 1.0 : 0.5)
+                    .opacity(showContent ? 1.0 : 0.0)
+                    
+                    // Title
+                    VStack(spacing: 8) {
+                        Text("Round Failed")
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        Text("You need \(session.requiredStreak) correct in a row")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .opacity(showContent ? 1.0 : 0.0)
+                    
+                    // Failed word card
+                    VStack(spacing: 12) {
+                        Text("The word was:")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Text(failedWord)
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.green.opacity(0.15))
+                            )
+                        
+                        if !userAnswer.isEmpty && userAnswer != "(timed out)" {
+                            HStack(spacing: 4) {
+                                Text("You typed:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(userAnswer)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color(.systemGray6))
+                    )
+                    .opacity(showContent ? 1.0 : 0.0)
+                    
+                    // Stats
+                    VStack(spacing: 12) {
+                        RoundFailedStatRow(
+                            icon: "flame.fill",
+                            label: "Streak Reached",
+                            value: streakProgress,
+                            color: .orange
+                        )
+                        RoundFailedStatRow(
+                            icon: "checkmark.circle.fill",
+                            label: "Words Correct",
+                            value: "\(session.correctWords.count)",
+                            color: .green
+                        )
+                        RoundFailedStatRow(
+                            icon: "number",
+                            label: "Total Attempted",
+                            value: "\(session.totalWordsAttempted)",
+                            color: .blue
+                        )
+                        if session.sessionStats.longestStreak > 0 {
+                            RoundFailedStatRow(
+                                icon: "star.fill",
+                                label: "Best Streak",
+                                value: "\(session.sessionStats.longestStreak)",
+                                color: .yellow
+                            )
+                        }
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.systemGray6))
+                    )
+                    .opacity(showContent ? 1.0 : 0.0)
+                    
+                    // Encouragement
+                    Text(encouragementMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .opacity(showContent ? 1.0 : 0.0)
+                    
+                    // Bottom padding so content doesn't hide behind pinned buttons
+                    Spacer(minLength: 16)
+                }
+                .padding(.horizontal)
+                .padding(.top, 20)
+            }
+            
+            // Pinned action buttons — always visible
+            VStack(spacing: 12) {
+                Button(action: onTryAgain) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Try Again")
+                            .fontWeight(.bold)
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.blue, .purple]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(14)
+                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                
+                Button(action: onBackToMenu) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "house.fill")
+                        Text("Back to Menu")
+                            .fontWeight(.medium)
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemGray5))
+                    )
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+            .background(
+                Color(.systemBackground)
+                    .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: -2)
+            )
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                showContent = true
+            }
+        }
+    }
+    
+    private var encouragementMessage: String {
+        let messages = [
+            "Don't give up! Practice makes perfect. 💪",
+            "Every mistake is a chance to learn! 📚",
+            "You've got this! Try again! 🌟",
+            "Keep going — you're improving! 🚀",
+            "Almost there! One more try! ✨"
+        ]
+        return messages.randomElement() ?? messages[0]
+    }
+}
+struct RoundFailedStatRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .frame(width: 24)
+            
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            Spacer()
+            
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+        }
+    }
+}
+
 // MARK: - Session Header
+
 struct SessionHeader: View {
     let level: Int
     let currentStreak: Int
@@ -467,6 +731,7 @@ struct SessionHeader: View {
 }
 
 // MARK: - Streak Dots
+
 struct StreakDotsView: View {
     let currentStreak: Int
     let requiredStreak: Int
@@ -496,7 +761,8 @@ struct StreakDotsView: View {
     }
 }
 
-// MARK: - Round Timer View (Cumulative)
+// MARK: - Round Timer View
+
 struct RoundTimerView: View {
     let timeRemaining: Double
     let totalTime: Double
@@ -524,7 +790,6 @@ struct RoundTimerView: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            // Circular progress
             ZStack {
                 Circle()
                     .stroke(Color(.systemGray5), lineWidth: 5)
@@ -542,7 +807,6 @@ struct RoundTimerView: View {
                     .foregroundColor(timerColor)
             }
             
-            // Time text
             VStack(alignment: .leading, spacing: 2) {
                 Text(formattedTime)
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
@@ -577,6 +841,7 @@ struct RoundTimerView: View {
 }
 
 // MARK: - Word Play Button
+
 struct WordPlayButton: View {
     let isPlaying: Bool
     let hasPlayed: Bool
@@ -616,6 +881,7 @@ struct WordPlayButton: View {
 }
 
 // MARK: - Active Hints Display
+
 struct ActiveHintsDisplay: View {
     let hints: Set<HintType>
     let word: Word
@@ -653,6 +919,7 @@ struct ActiveHintsDisplay: View {
 }
 
 // MARK: - Hint Button
+
 struct HintButton: View {
     let availableHints: Int
     let onTap: () -> Void
@@ -674,6 +941,7 @@ struct HintButton: View {
 }
 
 // MARK: - Time Up Overlay
+
 struct TimeUpOverlay: View {
     let correctWord: String
     let onDismiss: () -> Void
@@ -728,6 +996,7 @@ struct TimeUpOverlay: View {
 }
 
 // MARK: - Level Complete View
+
 struct LevelCompleteView: View {
     let session: SoloSession
     let xpEarned: Int
@@ -803,6 +1072,7 @@ struct CompletionStatRow: View {
 }
 
 // MARK: - Out Of Words View
+
 struct OutOfWordsView: View {
     let session: SoloSession
     let onRetry: () -> Void

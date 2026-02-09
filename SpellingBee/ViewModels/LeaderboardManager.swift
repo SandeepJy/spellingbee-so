@@ -20,6 +20,7 @@ final class LeaderboardManager: ObservableObject {
     }
 
     func loadMyRank() async {
+        guard !isLoadingRank else { return }
         isLoadingRank = true
         defer { isLoadingRank = false }
         do {
@@ -31,6 +32,7 @@ final class LeaderboardManager: ObservableObject {
     }
 
     func loadTopSpellers() async {
+        guard !isLoadingTop else { return }
         isLoadingTop = true
         defer { isLoadingTop = false }
         do {

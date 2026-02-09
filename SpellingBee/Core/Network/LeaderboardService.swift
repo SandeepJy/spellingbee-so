@@ -8,16 +8,17 @@ struct MyRankResponse: Codable, Sendable {
     let totalPlayers: Int
     let accuracy: Double
     let username: String
+    let totalWordsSpelled: Int
 }
 
 struct TopSpellerEntry: Codable, Identifiable, Sendable {
-    // Synthesise an id so ForEach is happy
     var id: String { "\(rank)-\(username)" }
     let rank: Int
     let username: String
     let accuracy: Double
     let level: Int
     let totalWordsSpelled: Int
+    let isCurrentUser: Bool
 }
 
 struct TopSpellersResponse: Codable, Sendable {
@@ -28,12 +29,8 @@ struct TopSpellersResponse: Codable, Sendable {
 
 actor LeaderboardService {
     static let shared = LeaderboardService()
-
     private let baseURL = "https://us-central1-spellingbee-20c3f.cloudfunctions.net"
-
     private init() {}
-
-    // MARK: - Fetch my rank
 
     func fetchMyRank(userToken: String) async throws -> MyRankResponse {
         guard let url = URL(string: "\(baseURL)/getMyRank") else {
@@ -42,13 +39,10 @@ actor LeaderboardService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(userToken)", forHTTPHeaderField: "Authorization")
-
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateHTTP(response)
         return try JSONDecoder().decode(MyRankResponse.self, from: data)
     }
-
-    // MARK: - Fetch top spellers
 
     func fetchTopSpellers(userToken: String, limit: Int = 10) async throws -> [TopSpellerEntry] {
         guard var components = URLComponents(string: "\(baseURL)/getTopSpellers") else {
@@ -56,18 +50,14 @@ actor LeaderboardService {
         }
         components.queryItems = [URLQueryItem(name: "limit", value: "\(limit)")]
         guard let url = components.url else { throw LeaderboardError.invalidURL }
-
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(userToken)", forHTTPHeaderField: "Authorization")
-
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateHTTP(response)
         let decoded = try JSONDecoder().decode(TopSpellersResponse.self, from: data)
         return decoded.players
     }
-
-    // MARK: - Helper
 
     private func validateHTTP(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
@@ -75,8 +65,7 @@ actor LeaderboardService {
         }
         switch http.statusCode {
         case 200: return
-        case 401: throw LeaderboardError.unauthorized
-        case 403: throw LeaderboardError.unauthorized
+        case 401, 403: throw LeaderboardError.unauthorized
         default: throw LeaderboardError.serverError(http.statusCode)
         }
     }

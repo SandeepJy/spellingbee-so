@@ -1,3 +1,4 @@
+/* eslint-disable block-spacing */
 /* eslint-disable object-curly-spacing */
 /* eslint-disable indent */
 /* eslint-disable max-len */
@@ -9,7 +10,7 @@ admin.initializeApp();
 
 const storage = new Storage();
 
-// --- EXISTING FUNCTIONS (unchanged) ---
+// --- EXISTING: getRandomWords ---
 exports.getRandomWords = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
@@ -52,6 +53,7 @@ exports.getRandomWords = functions.https.onRequest(async (req, res) => {
     }
 });
 
+// --- EXISTING: getWordsByLevel ---
 exports.getWordsByLevel = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
@@ -90,12 +92,7 @@ exports.getWordsByLevel = functions.https.onRequest(async (req, res) => {
             randomWords.push(available[idx]);
             available.splice(idx, 1);
         }
-        return res.status(200).json({
-            minLevel,
-            maxLevel,
-            count: randomWords.length,
-            words: randomWords,
-        });
+        return res.status(200).json({ minLevel, maxLevel, count: randomWords.length, words: randomWords });
     } catch (error) {
         console.error("Error in getWordsByLevel:", error);
         if (error.code === "auth/id-token-expired" || error.code === "auth/invalid-credential") {
@@ -105,14 +102,12 @@ exports.getWordsByLevel = functions.https.onRequest(async (req, res) => {
     }
 });
 
-// --- NEW: Get the calling user's leaderboard rank by accuracy ---
-//
-// Reads all soloProgress documents, computes accuracy for each user
-// (totalCorrectWords / totalWordsSpelled * 100), ranks them descending,
-// and returns the calling user's position plus total player count.
-//
-// Query params:  none required
-// Response: { rank: 3, totalPlayers: 2203, accuracy: 94.2, username: "BeeMaster" }
+// --- FIXED: getMyRank ---
+// Key fixes:
+//   1. No minimum-words filter — every user with a soloProgress doc is ranked.
+//   2. Users with 0 attempts get accuracy 0 and rank at the bottom.
+//   3. totalPlayers always reflects ALL users with a progress doc.
+//   4. Ties broken by totalWordsSpelled descending (more experience = better tie-break).
 exports.getMyRank = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
@@ -121,8 +116,6 @@ exports.getMyRank = functions.https.onRequest(async (req, res) => {
         res.set("Access-Control-Max-Age", "3600");
         return res.status(204).send("");
     }
-
-    // Auth
     if (!req.headers.authorization || !req.headers.authorization.startsWith("Bearer ")) {
         return res.status(403).send("Unauthorized");
     }
@@ -131,59 +124,71 @@ exports.getMyRank = functions.https.onRequest(async (req, res) => {
     try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
         const uid = decodedToken.uid;
-
-        // Fetch all soloProgress documents in one read
         const db = admin.firestore();
+
+        // Fetch every soloProgress document — no filtering so totalPlayers is accurate
         const snapshot = await db.collection("soloProgress").get();
 
         if (snapshot.empty) {
-            return res.status(200).json({ rank: 1, totalPlayers: 1, accuracy: 0, username: "" });
-        }
-
-        // Build ranked list — only include users who have attempted at least one word
-        const players = [];
-        snapshot.forEach((doc) => {
-            const d = doc.data();
-            const attempted = d.totalWordsSpelled || 0;
-            if (attempted > 0) {
-                const accuracy = (d.totalCorrectWords || 0) / attempted * 100;
-                players.push({ id: doc.id, accuracy });
-            }
-        });
-
-        // Sort descending by accuracy
-        players.sort((a, b) => b.accuracy - a.accuracy);
-
-        const totalPlayers = players.length;
-        const myIndex = players.findIndex((p) => p.id === uid);
-
-        if (myIndex === -1) {
-            // User hasn't played yet — place them last
+            // No progress docs at all — this user is the only one
             return res.status(200).json({
-                rank: totalPlayers + 1,
-                totalPlayers: totalPlayers + 1,
+                rank: 1,
+                totalPlayers: 1,
                 accuracy: 0,
                 username: "",
+                totalWordsSpelled: 0,
             });
         }
 
-        const myAccuracy = players[myIndex].accuracy;
+        // Build full player list including users with 0 attempts
+        const players = [];
+        let userInList = false;
 
-        // Fetch username from users collection
+        snapshot.forEach((doc) => {
+            const d = doc.data();
+            const attempted = d.totalWordsSpelled || 0;
+            const correct = d.totalCorrectWords || 0;
+            // Avoid division by zero — 0 attempted = 0% accuracy
+            const accuracy = attempted > 0 ? (correct / attempted) * 100 : 0;
+            players.push({
+                id: doc.id,
+                accuracy,
+                totalWordsSpelled: attempted,
+                level: d.level || 1,
+            });
+            if (doc.id === uid) userInList = true;
+        });
+
+        // If the calling user has no progress doc yet, add them at the bottom
+        if (!userInList) {
+            players.push({ id: uid, accuracy: 0, totalWordsSpelled: 0, level: 1 });
+        }
+
+        // Sort: accuracy DESC, then totalWordsSpelled DESC as tie-breaker
+        players.sort((a, b) => {
+            if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
+            return b.totalWordsSpelled - a.totalWordsSpelled;
+        });
+
+        const totalPlayers = players.length;
+        const myIndex = players.findIndex((p) => p.id === uid);
+        const me = players[myIndex];
+
+        // Fetch username
         let username = "";
         try {
             const userDoc = await db.collection("users").doc(uid).get();
             if (userDoc.exists) {
-                username = userDoc.data().username || userDoc.data().email || "";
+                const data = userDoc.data();
+                username = data.username || data.email || "";
             }
-        } catch (_) {
-            // Non-fatal — username is cosmetic
-        }
+        } catch (_) {/* non-fatal */ }
 
         return res.status(200).json({
             rank: myIndex + 1,
             totalPlayers,
-            accuracy: Math.round(myAccuracy * 10) / 10,
+            accuracy: Math.round(me.accuracy * 10) / 10,
+            totalWordsSpelled: me.totalWordsSpelled,
             username,
         });
     } catch (error) {
@@ -195,9 +200,11 @@ exports.getMyRank = functions.https.onRequest(async (req, res) => {
     }
 });
 
-// --- NEW: Get top 10 spellers globally (by accuracy, min 10 words attempted) ---
-//
-// Response: { players: [ { rank, username, accuracy, level, totalWordsSpelled }, ... ] }
+// --- FIXED: getTopSpellers ---
+// Key fixes:
+//   1. Lowered default minWords to 1 so test users with small sample sizes appear.
+//   2. Same tie-breaking logic as getMyRank.
+//   3. Marks whether the calling user is in the top list.
 exports.getTopSpellers = functions.https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
@@ -206,21 +213,18 @@ exports.getTopSpellers = functions.https.onRequest(async (req, res) => {
         res.set("Access-Control-Max-Age", "3600");
         return res.status(204).send("");
     }
-
-    // Auth
     if (!req.headers.authorization || !req.headers.authorization.startsWith("Bearer ")) {
         return res.status(403).send("Unauthorized");
     }
     const idToken = req.headers.authorization.split("Bearer ")[1];
 
     try {
-        await admin.auth().verifyIdToken(idToken);
-
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const callerUid = decodedToken.uid;
         const db = admin.firestore();
 
-        // Minimum words attempted to qualify for the leaderboard
-        // (avoids someone with 1 word correct showing 100%)
-        const MIN_WORDS = parseInt(req.query.minWords) || 10;
+        // For testing keep minWords=1; bump to 10+ in production
+        const MIN_WORDS = parseInt(req.query.minWords) || 1;
         const LIMIT = Math.min(parseInt(req.query.limit) || 10, 50);
 
         const snapshot = await db.collection("soloProgress").get();
@@ -229,7 +233,6 @@ exports.getTopSpellers = functions.https.onRequest(async (req, res) => {
             return res.status(200).json({ players: [] });
         }
 
-        // Collect qualifying players
         const players = [];
         snapshot.forEach((doc) => {
             const d = doc.data();
@@ -245,11 +248,15 @@ exports.getTopSpellers = functions.https.onRequest(async (req, res) => {
             }
         });
 
-        // Sort and take top N
-        players.sort((a, b) => b.accuracy - a.accuracy);
+        // Sort: accuracy DESC, totalWordsSpelled DESC
+        players.sort((a, b) => {
+            if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
+            return b.totalWordsSpelled - a.totalWordsSpelled;
+        });
+
         const top = players.slice(0, LIMIT);
 
-        // Fetch usernames in parallel
+        // Batch-fetch usernames
         const userRefs = top.map((p) => db.collection("users").doc(p.id).get());
         const userDocs = await Promise.all(userRefs);
 
@@ -265,6 +272,7 @@ exports.getTopSpellers = functions.https.onRequest(async (req, res) => {
                 accuracy: Math.round(p.accuracy * 10) / 10,
                 level: p.level,
                 totalWordsSpelled: p.totalWordsSpelled,
+                isCurrentUser: p.id === callerUid,
             };
         });
 

@@ -9,7 +9,7 @@ struct MainView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationView {
-                HomeTabContent()
+                HomeTabContent(selectedTab: $selectedTab)
                     .environmentObject(gameManager)
                     .environmentObject(userManager)
                     .environmentObject(leaderboardManager)
@@ -36,74 +36,48 @@ struct HomeTabContent: View {
     @EnvironmentObject var gameManager: GameManager
     @EnvironmentObject var userManager: UserManager
     @EnvironmentObject var leaderboardManager: LeaderboardManager
+    @Binding var selectedTab: Int
     @State private var showCreateGameView = false
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // ── Greeting + rank ──
-                HomeHeaderView(
+            VStack(spacing: 20) {
+                // Greeting header
+                HomeGreetingHeader(
                     user: gameManager.currentUser,
-                    rank: leaderboardManager.myRank,
-                    isLoadingRank: leaderboardManager.isLoadingRank,
                     onSignOut: { userManager.signOut() }
                 )
                 .padding(.horizontal)
 
-                // ── Play section ──
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Play")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .padding(.horizontal)
+                // Rank Card (prominent)
+                RankCard(
+                    rank: leaderboardManager.myRank,
+                    isLoading: leaderboardManager.isLoadingRank,
+                    onLeaderboardTap: { selectedTab = 1 }
+                )
+                .padding(.horizontal)
 
-                    HStack(spacing: 12) {
-                        // Solo card
-                        NavigationLink(destination:
-                            SoloModeMenuView()
-                                .environmentObject(SoloModeManager())
-                                .environmentObject(gameManager)
-                        ) {
-                            PlayModeCard(
-                                icon: "person.fill",
-                                title: "Solo",
-                                subtitle: "Practice on your own",
-                                colors: [.purple, .blue]
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                // Play section
+                PlayModesSection(
+                    onChallengeTap: { showCreateGameView = true }
+                )
+                .environmentObject(gameManager)
 
-                        // Challenge card
-                        Button(action: { showCreateGameView = true }) {
-                            PlayModeCard(
-                                icon: "person.2.fill",
-                                title: "Challenge",
-                                subtitle: "Compete with friends",
-                                colors: [.green, .teal]
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .sheet(isPresented: $showCreateGameView) {
-                            CreateGameView(showCreateGameView: $showCreateGameView)
-                                .environmentObject(gameManager)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-
-                // ── Active games ──
+                // Active Games Carousel
                 if !gameManager.isDataLoaded {
-                    VStack(spacing: 12) {
-                        ProgressView().scaleEffect(1.3)
-                        Text("Loading games…")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                    LoadingGamesPlaceholder()
                 } else {
-                    ActiveGamesSection()
+                    ActiveGamesCarouselSection()
                         .environmentObject(gameManager)
                 }
+
+                // Top Spellers Card
+                TopSpellersShowcaseCard(
+                    topSpellers: leaderboardManager.topSpellers,
+                    isLoading: leaderboardManager.isLoadingTop,
+                    onViewAllTap: { selectedTab = 1 }
+                )
+                .padding(.horizontal)
             }
             .padding(.vertical)
         }
@@ -113,7 +87,7 @@ struct HomeTabContent: View {
                     Image("SpellingBee")
                         .resizable()
                         .scaledToFit()
-                        .opacity(0.04)
+                        .opacity(0.03)
                 )
         )
         .navigationBarHidden(true)
@@ -121,45 +95,40 @@ struct HomeTabContent: View {
             await gameManager.loadData()
             await leaderboardManager.loadAll()
         }
+        .sheet(isPresented: $showCreateGameView) {
+            CreateGameView(showCreateGameView: $showCreateGameView)
+                .environmentObject(gameManager)
+        }
     }
 }
 
-// MARK: - Home Header
+// MARK: - Greeting Header
 
-struct HomeHeaderView: View {
+struct HomeGreetingHeader: View {
     let user: SpellGameUser?
-    let rank: MyRankResponse?
-    let isLoadingRank: Bool
     let onSignOut: () -> Void
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(greeting)
-                    .font(.title3)
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
 
                 Text(user?.displayName ?? "Speller")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.title2)
+                    .fontWeight(.bold)
                     .foregroundColor(.primary)
-
-                // Rank badge
-                if isLoadingRank {
-                    RankBadge(text: "Loading rank…", color: .gray)
-                } else if let rank = rank {
-                    RankBadge(
-                        text: "Rank #\(rank.rank) of \(rank.totalPlayers)",
-                        color: rankColor(rank.rank, total: rank.totalPlayers)
-                    )
-                }
             }
 
             Spacer()
 
             Button(action: onSignOut) {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundColor(.red.opacity(0.8))
+                    .padding(8)
+                    .background(Circle().fill(Color.red.opacity(0.1)))
             }
         }
     }
@@ -172,35 +141,50 @@ struct HomeHeaderView: View {
         default: return "Good evening,"
         }
     }
-
-    private func rankColor(_ rank: Int, total: Int) -> Color {
-        guard total > 0 else { return .gray }
-        let pct = Double(rank) / Double(total)
-        if pct <= 0.10 { return .yellow }
-        if pct <= 0.25 { return .blue }
-        if pct <= 0.50 { return .green }
-        return .secondary
-    }
 }
 
-struct RankBadge: View {
-    let text: String
-    let color: Color
+// MARK: - Play Modes Section
+
+struct PlayModesSection: View {
+    @EnvironmentObject var gameManager: GameManager
+    let onChallengeTap: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "chart.bar.fill")
-                .font(.caption2)
-            Text(text)
-                .font(.caption)
-                .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Play")
+                .font(.title3)
+                .fontWeight(.bold)
+                .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                // Solo Mode Card
+                NavigationLink(destination:
+                    SoloModeMenuView()
+                        .environmentObject(SoloModeManager())
+                        .environmentObject(gameManager)
+                ) {
+                    PlayModeCard(
+                        icon: "person.fill",
+                        title: "Solo",
+                        subtitle: "Play at your own pace",
+                        colors: [.purple, .blue]
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Challenge Card
+                Button(action: onChallengeTap) {
+                    PlayModeCard(
+                        icon: "person.2.fill",
+                        title: "Challenge",
+                        subtitle: "Compete with friends",
+                        colors: [.green, .teal]
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal)
         }
-        .foregroundColor(color)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(
-            Capsule().fill(color.opacity(0.12))
-        )
     }
 }
 
@@ -213,11 +197,11 @@ struct PlayModeCard: View {
     let colors: [Color]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 28))
+                .font(.system(size: 24))
                 .foregroundColor(.white)
-                .frame(width: 50, height: 50)
+                .frame(width: 44, height: 44)
                 .background(
                     Circle().fill(Color.white.opacity(0.25))
                 )
@@ -233,8 +217,8 @@ struct PlayModeCard: View {
                     .foregroundColor(.white.opacity(0.85))
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, minHeight: 140)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 130)
         .background(
             LinearGradient(
                 gradient: Gradient(colors: colors),
@@ -247,10 +231,27 @@ struct PlayModeCard: View {
     }
 }
 
-// MARK: - Active Games Section
+// MARK: - Loading Placeholder
 
-struct ActiveGamesSection: View {
+struct LoadingGamesPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(1.2)
+            Text("Loading games…")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 140)
+        .padding()
+    }
+}
+
+// MARK: - Active Games Carousel Section
+
+struct ActiveGamesCarouselSection: View {
     @EnvironmentObject var gameManager: GameManager
+    @State private var currentIndex: Int = 0
 
     private var userGames: [MultiUserGame] {
         gameManager.games.filter {
@@ -266,40 +267,77 @@ struct ActiveGamesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Active Games")
-                .font(.title2)
-                .fontWeight(.bold)
-                .padding(.horizontal)
+            HStack {
+                Text("Active Games")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                if !userGames.isEmpty {
+                    Text("\(userGames.count) game\(userGames.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
 
             if userGames.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "gamecontroller")
-                        .font(.system(size: 50))
-                        .foregroundColor(.gray.opacity(0.5))
-                    Text("No active games")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("Start a solo session or challenge a friend!")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, minHeight: 160)
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color(.systemGray6))
-                )
-                .padding(.horizontal)
+                EmptyGamesCard()
+                    .padding(.horizontal)
             } else {
-                VStack(spacing: 12) {
-                    ForEach(userGames) { game in
-                        GameCardView(gameID: game.id)
-                            .environmentObject(gameManager)
-                    }
+                // Carousel
+                SnapCarousel(
+                    items: userGames,
+                    itemWidth: UIScreen.main.bounds.width - 80,
+                    itemSpacing: 12,
+                    peekAmount: 20
+                ) { game in
+                    CompactGameCard(game: game)
+                        .environmentObject(gameManager)
                 }
-                .padding(.horizontal)
+                .frame(height: 140)
+                
+                // Page indicator
+                if userGames.count > 1 {
+                    HStack {
+                        Spacer()
+                        CarouselPageIndicator(
+                            totalPages: userGames.count,
+                            currentPage: currentIndex
+                        )
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                }
             }
         }
+    }
+}
+
+// MARK: - Empty Games Card
+
+struct EmptyGamesCard: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "gamecontroller")
+                .font(.system(size: 40))
+                .foregroundColor(.gray.opacity(0.5))
+            
+            Text("No active games")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("Start a solo session or challenge a friend!")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemGray6))
+        )
     }
 }

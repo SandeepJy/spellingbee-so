@@ -4,40 +4,9 @@ struct MainView: View {
     @EnvironmentObject var gameManager: GameManager
     @EnvironmentObject var userManager: UserManager
     @StateObject private var leaderboardManager = LeaderboardManager()
-    @State private var selectedTab = 0
-
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationView {
-                HomeTabContent(selectedTab: $selectedTab)
-                    .environmentObject(gameManager)
-                    .environmentObject(userManager)
-                    .environmentObject(leaderboardManager)
-            }
-            .tabItem { Label("Home", systemImage: "house.fill") }
-            .tag(0)
-
-            NavigationView {
-                LeaderboardView()
-                    .environmentObject(leaderboardManager)
-            }
-            .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
-            .tag(1)
-        }
-        .task {
-            await leaderboardManager.loadAll()
-        }
-    }
-}
-
-// MARK: - Home Tab
-
-struct HomeTabContent: View {
-    @EnvironmentObject var gameManager: GameManager
-    @EnvironmentObject var userManager: UserManager
-    @EnvironmentObject var leaderboardManager: LeaderboardManager
-    @Binding var selectedTab: Int
     @State private var showCreateGameView = false
+    @State private var selectedGame: MultiUserGame?
+    @State private var showLeaderboard = false
 
     var body: some View {
         ScrollView {
@@ -49,11 +18,15 @@ struct HomeTabContent: View {
                 )
                 .padding(.horizontal)
 
-                // Rank Card (prominent)
+                // Rank Card (prominent) - taps to leaderboard
+                NavigationLink(destination: LeaderboardView().environmentObject(leaderboardManager), isActive: $showLeaderboard) {
+                    EmptyView()
+                }
+                
                 RankCard(
                     rank: leaderboardManager.myRank,
                     isLoading: leaderboardManager.isLoadingRank,
-                    onLeaderboardTap: { selectedTab = 1 }
+                    onLeaderboardTap: { showLeaderboard = true }
                 )
                 .padding(.horizontal)
 
@@ -67,7 +40,7 @@ struct HomeTabContent: View {
                 if !gameManager.isDataLoaded {
                     LoadingGamesPlaceholder()
                 } else {
-                    ActiveGamesCarouselSection()
+                    ActiveGamesCarouselSection(selectedGame: $selectedGame)
                         .environmentObject(gameManager)
                 }
 
@@ -75,9 +48,11 @@ struct HomeTabContent: View {
                 TopSpellersShowcaseCard(
                     topSpellers: leaderboardManager.topSpellers,
                     isLoading: leaderboardManager.isLoadingTop,
-                    onViewAllTap: { selectedTab = 1 }
+                    onViewAllTap: { showLeaderboard = true }
                 )
                 .padding(.horizontal)
+                
+                Spacer(minLength: 20)
             }
             .padding(.vertical)
         }
@@ -98,6 +73,15 @@ struct HomeTabContent: View {
         .sheet(isPresented: $showCreateGameView) {
             CreateGameView(showCreateGameView: $showCreateGameView)
                 .environmentObject(gameManager)
+        }
+        .fullScreenCover(item: $selectedGame) { game in
+            NavigationView {
+                GamePlayView(game: game)
+                    .environmentObject(gameManager)
+            }
+        }
+        .task {
+            await leaderboardManager.loadAll()
         }
     }
 }
@@ -251,6 +235,7 @@ struct LoadingGamesPlaceholder: View {
 
 struct ActiveGamesCarouselSection: View {
     @EnvironmentObject var gameManager: GameManager
+    @Binding var selectedGame: MultiUserGame?
     @State private var currentIndex: Int = 0
 
     private var userGames: [MultiUserGame] {
@@ -291,10 +276,13 @@ struct ActiveGamesCarouselSection: View {
                     items: userGames,
                     itemWidth: UIScreen.main.bounds.width - 80,
                     itemSpacing: 12,
-                    peekAmount: 20
+                    peekAmount: 20,
+                    currentIndex: $currentIndex
                 ) { game in
-                    CompactGameCard(game: game)
-                        .environmentObject(gameManager)
+                    CompactGameCard(game: game, onTap: {
+                        selectedGame = game
+                    })
+                    .environmentObject(gameManager)
                 }
                 .frame(height: 140)
                 

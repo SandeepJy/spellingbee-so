@@ -1,20 +1,14 @@
 import SwiftUI
 
 /// A generic horizontal carousel with snapping behavior and peek into adjacent items.
-/// - Parameters:
-///   - items: The array of identifiable items to display.
-///   - itemWidth: The width of each item.
-///   - itemSpacing: Spacing between items.
-///   - peekAmount: How much of the next/previous item to show.
-///   - content: A view builder that creates the view for each item.
 struct SnapCarousel<Item: Identifiable, Content: View>: View {
     let items: [Item]
     let itemWidth: CGFloat
     let itemSpacing: CGFloat
     let peekAmount: CGFloat
+    @Binding var currentIndex: Int
     @ViewBuilder let content: (Item) -> Content
     
-    @State private var currentIndex: Int = 0
     @GestureState private var dragOffset: CGFloat = 0
     
     init(
@@ -22,12 +16,14 @@ struct SnapCarousel<Item: Identifiable, Content: View>: View {
         itemWidth: CGFloat = 280,
         itemSpacing: CGFloat = 16,
         peekAmount: CGFloat = 24,
+        currentIndex: Binding<Int>,
         @ViewBuilder content: @escaping (Item) -> Content
     ) {
         self.items = items
         self.itemWidth = itemWidth
         self.itemSpacing = itemSpacing
         self.peekAmount = peekAmount
+        self._currentIndex = currentIndex
         self.content = content
     }
     
@@ -56,7 +52,7 @@ struct SnapCarousel<Item: Identifiable, Content: View>: View {
                         state = value.translation.width
                     }
                     .onEnded { value in
-                        let threshold = 40.0
+                        let threshold: CGFloat = 40.0
                         var newIndex = currentIndex
                         
                         if value.translation.width < -threshold {
@@ -70,8 +66,19 @@ struct SnapCarousel<Item: Identifiable, Content: View>: View {
                         }
                     }
             )
+            .onAppear {
+                // Ensure currentIndex is within bounds
+                if currentIndex >= items.count {
+                    currentIndex = max(0, items.count - 1)
+                }
+            }
+            .onChange(of: items.count) { _, newCount in
+                // Reset index if items change
+                if currentIndex >= newCount {
+                    currentIndex = max(0, newCount - 1)
+                }
+            }
         }
-        .frame(height: itemWidth * 0.6)
     }
     
     private func calculateOffset(containerWidth: CGFloat) -> CGFloat {
@@ -122,25 +129,42 @@ struct CarouselPageIndicator: View {
         let color: Color
     }
     
-    let items = [
-        PreviewItem(title: "Card 1", color: .blue),
-        PreviewItem(title: "Card 2", color: .green),
-        PreviewItem(title: "Card 3", color: .orange),
-        PreviewItem(title: "Card 4", color: .purple)
-    ]
-    
-    return VStack {
-        SnapCarousel(items: items, itemWidth: 280, itemSpacing: 16, peekAmount: 24) { item in
-            RoundedRectangle(cornerRadius: 16)
-                .fill(item.color)
-                .overlay(
-                    Text(item.title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                )
+    struct PreviewWrapper: View {
+        @State private var currentIndex = 0
+        
+        let items = [
+            PreviewItem(title: "Card 1", color: .blue),
+            PreviewItem(title: "Card 2", color: .green),
+            PreviewItem(title: "Card 3", color: .orange),
+            PreviewItem(title: "Card 4", color: .purple)
+        ]
+        
+        var body: some View {
+            VStack {
+                SnapCarousel(
+                    items: items,
+                    itemWidth: 280,
+                    itemSpacing: 16,
+                    peekAmount: 24,
+                    currentIndex: $currentIndex
+                ) { item in
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(item.color)
+                        .overlay(
+                            Text(item.title)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                        )
+                }
+                .frame(height: 180)
+                
+                CarouselPageIndicator(totalPages: items.count, currentPage: currentIndex)
+                    .padding(.top, 8)
+            }
+            .padding()
         }
-        .frame(height: 180)
     }
-    .padding()
+    
+    return PreviewWrapper()
 }

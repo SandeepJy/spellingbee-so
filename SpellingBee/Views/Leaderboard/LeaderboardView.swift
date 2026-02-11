@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LeaderboardView: View {
     @EnvironmentObject var manager: LeaderboardManager
+    @Environment(\.presentationMode) var presentationMode
 
     var body: some View {
         ScrollView {
@@ -14,6 +15,7 @@ struct LeaderboardView: View {
         .background(Color(.systemBackground))
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.large)
+        .navigationBarBackButtonHidden(false)
         .refreshable { await manager.loadAll() }
         .alert("Error", isPresented: .init(
             get: { manager.error != nil },
